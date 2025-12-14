@@ -137,9 +137,12 @@ def get_datalog_from_s3_per_hiveperiod(
 ):
     logger = logging.getLogger(__name__)
 
-    logger.info(f"Grabbing datalog for device {s3key_list} from s3")
+    logger.info("Grabbing datalog for device all from s3")
 
-    s3key_list_string = f"['s3://{bucket_name}/" + "', '".join(s3key_list) + "']"
+    s3key_list_string = (
+        f"['s3://{bucket_name}/" + f"', 's3://{bucket_name}/".join(s3key_list) + "']"
+    )
+    print(s3key_list_string[:100])
     data = conn.sql(f"""
         SELECT 
             *,
@@ -209,9 +212,9 @@ def main():
     with init_duckdb_connection(aws_creds, "2GB") as conn:
         get_datalog_from_s3_per_hiveperiod(
             conn,
+            BUCKET_NAME,
             keys,
             "data",
-            # TARGET_BUCKET_PATH,
         )
 
     logger.info("All Done!")
