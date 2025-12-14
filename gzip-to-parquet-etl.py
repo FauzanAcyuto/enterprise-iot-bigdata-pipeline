@@ -132,12 +132,14 @@ def get_all_keys_in_district(aws_credentials, bucket, distrik, date):
     return keys, deviceids
 
 
-def get_datalog_from_s3_per_hiveperiod(conn, s3key_list: list, targetpath: str):
+def get_datalog_from_s3_per_hiveperiod(
+    conn, bucket_name: str, s3key_list: list, targetpath: str
+):
     logger = logging.getLogger(__name__)
 
     logger.info(f"Grabbing datalog for device {s3key_list} from s3")
 
-    s3key_list_string = "['" + "', '".join(s3key_list) + "']"
+    s3key_list_string = f"['s3://{bucket_name}/" + "', '".join(s3key_list) + "']"
     data = conn.sql(f"""
         SELECT 
             *,
