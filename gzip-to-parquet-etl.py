@@ -56,7 +56,7 @@ def setup_logger(loglevel, log_file, logsize, files_to_keep):
 
 
 @contextmanager
-def init_duckdb_connection(aws_credentials):
+def init_duckdb_connection(aws_credentials: dict, ram_limit: str):
     logger = logging.getLogger(__name__)
 
     existing_keys = list(aws_credentials.keys())
@@ -72,6 +72,7 @@ def init_duckdb_connection(aws_credentials):
         conn = duckdb.connect()
         conn.execute("INSTALL httpfs;")
         conn.execute("LOAD httpfs;")
+        conn.execute(f"SET memory_limit = '{ram_limit}'")
         conn.execute(f"SET s3_region = '{aws_credentials['aws_region']}';")
         conn.execute(
             f"SET s3_access_key_id = '{aws_credentials['aws_access_key_id']}';"
@@ -203,7 +204,7 @@ def main():
             row = f"{row}\n"
             file.write(row)
 
-    with init_duckdb_connection(aws_creds) as conn:
+    with init_duckdb_connection(aws_creds, "2GB") as conn:
         get_datalog_from_s3_per_hiveperiod(
             conn,
             keys,
