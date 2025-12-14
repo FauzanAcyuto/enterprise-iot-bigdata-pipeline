@@ -142,7 +142,7 @@ def get_datalog_from_s3_per_hiveperiod(conn, s3key_list: list, targetpath: str):
         SELECT 
             *,
             filename AS source_file
-        FROM read_json_auto('{s3key_list_string}', filename=true)
+        FROM read_json_auto({s3key_list_string}, filename=true)
     """)
 
     logger.info("Got the main data from s3")
