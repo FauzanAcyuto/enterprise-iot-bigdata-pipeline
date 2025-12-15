@@ -16,6 +16,8 @@ with open(Path(CREDENTIALS_PATH), "r") as file:
 TARGET_BUCKET_PATH = "s3://smartdbucket/datalogparquet"
 BUCKET_NAME = "smartdbucket"
 SOURCE_KEY_GLOB = "s3://smartdbucket/datalog"
+HIVEPERIOD = "20251213"
+DISTRIK = "BRCG"
 
 # logging parameters
 LOG_LEVEL = logging.INFO
@@ -95,7 +97,7 @@ def get_all_keys_in_district(aws_credentials, bucket, distrik, date):
         logger.exception(
             f"AWS Credentials doesn't contain required keys {required_keys}"
         )
-        raise
+        raise Exception
 
     logger.info("Getting deviceids")
     s3 = boto3.client(
@@ -133,7 +135,7 @@ def get_all_keys_in_district(aws_credentials, bucket, distrik, date):
 
 
 def get_datalog_from_s3_per_hiveperiod(
-    conn, bucket_name: str, s3key_list: list, targetpath: str
+    conn, bucket_name: str, s3key_list: list, targetpath: str, distrik: str
 ):
     logger = logging.getLogger(__name__)
 
@@ -146,6 +148,8 @@ def get_datalog_from_s3_per_hiveperiod(
     data = conn.sql(f"""
         SELECT 
             *,
+            '{distrik}' AS dstrct_code,
+            CAST(to_timestamp(heartbeat) + INTERVAL 8 HOURS AS DATE) as hiveperiod,
             filename AS source_file
         FROM read_json_auto({s3key_list_string}, filename=true)
     """)
@@ -159,14 +163,16 @@ def get_datalog_from_s3_per_hiveperiod(
 
         return None
 
-    logger.info("Writing file to disk as parquet")
+    logger.info(f"Writing parquet file to target with {row_count} rows")
 
     conn.execute(f"""
-        COPY (SELECT *,CAST(to_timestamp(heartbeat) + INTERVAL 8 HOURS AS DATE) as hiveperiod FROM data)
+        COPY (SELECT * FROM data)
         TO '{targetpath}/datalog' 
         (
             FORMAT parquet,
-            COMPRESSION snappy
+            COMPRESSION snappy,
+            PARTITION_BY (dstrct_code,hiveperiod),
+            APPEND
         )
     """)
 
@@ -202,7 +208,9 @@ def datalog_compacter(conn, targetpath: str):
 def main():
     logger = logging.getLogger()
     # List files that need to be processed
-    keys, devices = get_all_keys_in_district(aws_creds, BUCKET_NAME, "BRCG", "20251212")
+    keys, devices = get_all_keys_in_district(
+        aws_creds, BUCKET_NAME, DISTRIK, HIVEPERIOD
+    )
 
     with open(Path("data/keys.csv"), "a") as file:
         for row in keys:
@@ -211,10 +219,7 @@ def main():
 
     with init_duckdb_connection(aws_creds, "2GB") as conn:
         get_datalog_from_s3_per_hiveperiod(
-            conn,
-            BUCKET_NAME,
-            keys,
-            "data",
+            conn, BUCKET_NAME, keys, TARGET_BUCKET_PATH, DISTRIK
         )
 
     logger.info("All Done!")

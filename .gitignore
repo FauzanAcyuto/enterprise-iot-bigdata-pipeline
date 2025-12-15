@@ -8,6 +8,7 @@ wheels/
 data/
 creds/
 logs/
+.tmp
 
 # Virtual environments
 .venv
