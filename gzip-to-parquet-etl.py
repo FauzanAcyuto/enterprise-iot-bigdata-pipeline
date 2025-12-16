@@ -1,11 +1,13 @@
 import json
 import logging
 from contextlib import contextmanager
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import boto3
 import duckdb
+from sqlalchemy import URL, create_engine, text
 
 # ====== CONFIG ======
 CREDENTIALS_PATH = "creds/creds.json"
@@ -13,11 +15,14 @@ with open(Path(CREDENTIALS_PATH), "r") as file:
     creds = json.load(file)
     aws_creds = creds["AWS"]
 
-TARGET_BUCKET_PATH = "s3://smartdbucket/datalogparquet"
+# TARGET_BUCKET_PATH = "s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania"
+TARGET_BUCKET_PATH = "data"
 BUCKET_NAME = "smartdbucket"
 SOURCE_KEY_GLOB = "s3://smartdbucket/datalog"
 HIVEPERIOD = "20251213"
-DISTRIK = "BRCG"
+DISTRIK = "BRCB"
+RAM_LIMIT = "20GB"
+KEY_LIMIT_PER_RUN = 1000
 
 # logging parameters
 LOG_LEVEL = logging.INFO
@@ -55,6 +60,66 @@ def setup_logger(loglevel, log_file, logsize, files_to_keep):
     logger = logging.getLogger()
     logger.info(f"Logging initialized → {log_file}")
     return logger
+
+
+def generate_sql_engine(driver, creds_path, creds_name, **additional_params):
+    """
+    Generate SQLAlchemy engine from credentials file.
+
+    Args:
+        driver: SQLAlchemy driver name (e.g., 'mssql+pyodbc')
+        creds_path: Path to credentials JSON file
+        creds_name: Key name in credentials JSON
+        **additional_params: Additional URL parameters
+
+    Returns:
+        SQLAlchemy engine
+
+    Raises:
+        FileNotFoundError: If credentials file not found
+        KeyError: If credentials key not found in JSON
+    """
+    # get db creds
+    logger = logging.getLogger(__name__)
+
+    creds_path = Path(creds_path)
+    # Validate credentials file
+    if not creds_path.exists():
+        logger.error(f"Credentials file not found: {creds_path}")
+        raise FileNotFoundError(f"Credentials file not found: {creds_path}")
+
+    try:
+        # Load credentials
+        with open(creds_path, "r") as file:
+            all_creds = json.load(file)
+
+        if creds_name not in all_creds:
+            available = ", ".join(all_creds.keys())
+            logger.error(f"Database '{creds_name}' not found in credentials")
+            raise KeyError(f"Database '{creds_name}' not found. Available: {available}")
+        creds = all_creds[creds_name]
+        logger.info(f"Loaded credentials for: {creds_name}")
+
+        # Create engine
+        url_obj = URL.create(drivername=driver, **creds, **additional_params)
+        engine = create_engine(
+            url_obj,
+            pool_pre_ping=True,  # Test connections before using
+            # pool_size=5,
+            # max_overflow=10,
+        )
+
+        # Test connection
+        logger.info("Testing database connection...")
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        logger.info("Database connection successful")
+
+        return engine
+
+    except Exception as e:
+        logger.exception(f"Failed to create SQL engine {e}")
+        raise
 
 
 @contextmanager
@@ -134,6 +199,46 @@ def get_all_keys_in_district(aws_credentials, bucket, distrik, date):
     return keys, deviceids
 
 
+def get_pending_keys_sql(engine, distrik, file_limit=1000):
+    logger = logging.getLogger(__name__)
+
+    logger.info(f"Getting log files S3 keys to compress with limit: {file_limit}")
+    with engine.connect() as conn:
+        query = text(f"""SELECT TOP {file_limit} file_path_s3 
+                     FROM tbl_t_upload_datalog 
+                     WHERE is_upload_s3 = 'true'
+                        AND distrik = :distrik
+                        AND (compression_status != 'SUCCESS'  OR compression_status IS NULL)
+                     ORDER BY upload_s3_date DESC
+                     """)
+
+        result = conn.execute(query, {"distrik": distrik})
+        list_of_keys = [row[0] for row in result]
+
+    row_count = len(list_of_keys)
+    logger.info(f"Got {row_count} of keys to work on.")
+    return list_of_keys
+
+
+def update_compression_status_in_db(engine, keys: list):
+    logger = logging.getLogger(__name__)
+
+    row_num = len(keys)
+    logger.info(f"Updating success status for {row_num} keys")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    key_list_string = "','".join(keys)
+    with engine.connect() as conn:
+        query = text(f"""UPDATE tbl_t_upload_datalog
+                        SET compression_status = 'SUCCESS', compression_timestamp = '{now}'
+                        WHERE file_path_s3 IN ('{key_list_string}')
+                     """)
+
+        result = conn.execute(query)
+        conn.commit()
+
+    return result
+
+
 def get_datalog_from_s3_per_hiveperiod(
     conn, bucket_name: str, s3key_list: list, targetpath: str, distrik: str
 ):
@@ -171,7 +276,7 @@ def get_datalog_from_s3_per_hiveperiod(
         (
             FORMAT parquet,
             COMPRESSION snappy,
-            PARTITION_BY (dstrct_code,hiveperiod),
+            PARTITION_BY (hiveperiod,dstrct_code),
             APPEND
         )
     """)
@@ -208,20 +313,19 @@ def datalog_compacter(conn, targetpath: str):
 def main():
     logger = logging.getLogger()
     # List files that need to be processed
-    keys, devices = get_all_keys_in_district(
-        aws_creds, BUCKET_NAME, DISTRIK, HIVEPERIOD
-    )
+    # keys, devices = get_all_keys_in_district(
+    # aws_creds, BUCKET_NAME, DISTRIK, HIVEPERIOD
+    # )
+    engine = generate_sql_engine("mssql+pyodbc", CREDENTIALS_PATH, "pama-jiepsqco403")
+    keys = get_pending_keys_sql(engine, DISTRIK, KEY_LIMIT_PER_RUN)
 
-    with open(Path("data/keys.csv"), "a") as file:
-        for row in keys:
-            row = f"{row}\n"
-            file.write(row)
-
-    with init_duckdb_connection(aws_creds, "2GB") as conn:
+    with init_duckdb_connection(aws_creds, RAM_LIMIT) as conn:
         get_datalog_from_s3_per_hiveperiod(
             conn, BUCKET_NAME, keys, TARGET_BUCKET_PATH, DISTRIK
         )
+    result = update_compression_status_in_db(engine, keys)
 
+    print(result)
     logger.info("All Done!")
     # get data and write into into partitions in one go
 
