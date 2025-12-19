@@ -4,10 +4,23 @@ from contextlib import contextmanager
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from time import sleep
 
 import boto3
 import duckdb
 from sqlalchemy import URL, create_engine, text
+
+# ====== USER INPUT ======
+DISTRIK = input("What district should we work on? ").upper()
+if DISTRIK not in ("BRCB", "BRCG"):
+    raise Exception("Distrik not in BRCB or BRCG!")
+
+run_type = input("STEADY or BOOST mode? ").upper()
+if run_type == 'BOOST':
+    SLEEP_DURATION = 0
+else:
+    SLEEP_DURATION = 3600
+
 
 # ====== CONFIG ======
 CREDENTIALS_PATH = "creds/creds.json"
@@ -19,14 +32,12 @@ TARGET_BUCKET_PATH = "s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania"
 # TARGET_BUCKET_PATH = "data"
 BUCKET_NAME = "smartdbucket"
 SOURCE_KEY_GLOB = "s3://smartdbucket/datalog"
-HIVEPERIOD = "20251213"
-DISTRIK = "BRCB"
 RAM_LIMIT = "20GB"
 KEY_LIMIT_PER_RUN = 2000
 
 # logging parameters
 LOG_LEVEL = logging.INFO
-LOG_FILE_PATH = "logs/gzip_to_parquet.log"
+LOG_FILE_PATH = f"logs/gzip_to_parquet_{DISTRIK}.log"
 LOG_SIZE_MB = 1
 LOG_FILES_TO_KEEP = 5
 
@@ -187,9 +198,7 @@ def get_all_keys_in_district(aws_credentials, bucket, distrik, date):
     # datelist = [f"{date}{i:02d}" for i in r]
 
     for device_prefix in deviceids:
-        print("device_prefix: ", device_prefix)
         date_prefix = f"{device_prefix}{date}"  # e.g., "jobsite1/device1/20240101"
-        print("date_prefix: ", date_prefix)
         for page in paginator.paginate(Bucket=bucket, Prefix=date_prefix):
             for obj in page.get("Contents", []):
                 keys.append(obj["Key"])
@@ -201,45 +210,43 @@ def get_all_keys_in_district(aws_credentials, bucket, distrik, date):
 
 def get_pending_keys_sql(engine, distrik, file_limit=1000):
     logger = logging.getLogger(__name__)
-
     logger.info(f"Getting log files S3 keys to compress with limit: {file_limit}")
-    with engine.connect() as conn:
+
+    if distrik == "BRCB":
         query = text(f"""SELECT TOP {file_limit} file_path_s3 
                      FROM tbl_t_upload_datalog 
                      WHERE is_upload_s3 = 'true'
-                        AND distrik = :distrik
+                        AND distrik = 'BRCB'
+                        AND file_path_lokal != 'Minio'
                         AND (compression_status != 'SUCCESS'  OR compression_status IS NULL)
-                     ORDER BY upload_s3_date DESC
+                        AND upload_s3_date >= '2025-12-01 00:00'
+                     ORDER BY upload_s3_date ASC
                      """)
+    elif distrik == "BRCG":
+        query = text(f"""SELECT TOP {file_limit} file_name
+                        FROM tbl_t_upload_s3_log
+                        WHERE distrik = 'BRCG'
+                            AND (compression_status IS NULL OR compression_status != 'SUCCESS')
+                            AND status = 'OK'
+                            AND upload_date >= '2025-12-01 00:00'
+                        ORDER BY upload_date ASC
+                    """)
+    else:
+        logger.exception("District variable not in 'BRCB' OR 'BRCG'")
+        raise Exception
 
-        result = conn.execute(query, {"distrik": distrik})
+    with engine.connect() as conn:
+        result = conn.execute(query)
         list_of_keys = [row[0] for row in result]
 
     row_count = len(list_of_keys)
+
     if row_count == 0:
         logger.info("No more pending data to process!")
-        raise Exception
+        return []
+
     logger.info(f"Got {row_count} of keys to work on.")
     return list_of_keys
-
-
-def update_compression_status_in_db(engine, keys: list):
-    logger = logging.getLogger(__name__)
-
-    row_num = len(keys)
-    logger.info(f"Updating success status for {row_num} keys")
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    key_list_string = "','".join(keys)
-    with engine.connect() as conn:
-        query = text(f"""UPDATE tbl_t_upload_datalog
-                        SET compression_status = 'SUCCESS', compression_timestamp = '{now}'
-                        WHERE file_path_s3 IN ('{key_list_string}')
-                     """)
-
-        result = conn.execute(query)
-        conn.commit()
-
-    return result
 
 
 def get_datalog_from_s3_per_hiveperiod(
@@ -273,7 +280,7 @@ def get_datalog_from_s3_per_hiveperiod(
 
     logger.info(f"Writing parquet file to target with {row_count} rows")
 
-    conn.execute(f"""
+    main_query = f"""
         COPY (SELECT * FROM data)
         TO '{targetpath}/datalog' 
         (
@@ -282,27 +289,68 @@ def get_datalog_from_s3_per_hiveperiod(
             PARTITION_BY (hiveperiod,dstrct_code),
             APPEND
         )
-    """)
+    """
+    try:
+        conn.execute(main_query)
+    except Exception:
+        logger.exception("Main compacter query failed!")
+        raise
 
     logger.info("Writing metadata to conversion log")
 
-    conn.execute(f"""
-        COPY (SELECT 
-            filename,
-            'SUCCESS' as conversion_status
-        FROM data
-        )
-        TO '{targetpath}/metadata' 
-        (
-            FORMAT parquet,
-            COMPRESSION snappy,
-            APPEND
-        )
-    """)
+    # metadata_query = f"""
+    #     COPY (SELECT 
+    #         filename,
+    #         COUNT(1),
+    #         'SUCCESS' as conversion_status
+    #     FROM data
+    #     GROUP BY filename
+    #     )
+    #     TO '{targetpath}/metadata' 
+    #     (
+    #         FORMAT parquet,
+    #         COMPRESSION snappy,
+    #         APPEND
+    #     )
+    # """
+    # try:
+    #     conn.execute(metadata_query)
+    # except Exception:
+    #     logger.exception("Metadata query failed!")
 
     logger.info("All done!")
 
     return None
+
+
+def update_compression_status_in_db(engine, keys: list, distrik: str):
+    logger = logging.getLogger(__name__)
+    row_num = len(keys)
+    logger.info(f"Updating success status for {row_num} keys")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    key_list_string = "','".join(keys)
+
+    if distrik == "BRCB":
+        query = text(f"""UPDATE tbl_t_upload_datalog
+                        SET compression_status = 'SUCCESS', compression_timestamp = '{now}'
+                        WHERE file_path_s3 IN ('{key_list_string}')
+                     """)
+
+    elif distrik == "BRCG":
+        query = text(f"""UPDATE tbl_t_upload_s3_log
+                        SET compression_status = 'SUCCESS', compression_timestamp = '{now}'
+                        WHERE file_name IN ('{key_list_string}') and status = 'OK'
+                     """)
+
+    else:
+        logger.exception("District variable not in 'BRCB' OR 'BRCG'")
+        raise Exception
+
+    with engine.connect() as conn:
+        result = conn.execute(query)
+        conn.commit()
+
+    return result
 
 
 def datalog_compacter(conn, targetpath: str):
@@ -315,6 +363,8 @@ def datalog_compacter(conn, targetpath: str):
 
 def main():
     logger = logging.getLogger()
+
+    logger.info(f'RAM LIMIT: {RAM_LIMIT}')
     # List files that need to be processed
     # keys, devices = get_all_keys_in_district(
     # aws_creds, BUCKET_NAME, DISTRIK, HIVEPERIOD
@@ -322,11 +372,14 @@ def main():
     engine = generate_sql_engine("mssql+pyodbc", CREDENTIALS_PATH, "pama-jiepsqco403")
     keys = get_pending_keys_sql(engine, DISTRIK, KEY_LIMIT_PER_RUN)
 
+    if len(keys)==0:
+        return None
+
     with init_duckdb_connection(aws_creds, RAM_LIMIT) as conn:
         get_datalog_from_s3_per_hiveperiod(
             conn, BUCKET_NAME, keys, TARGET_BUCKET_PATH, DISTRIK
         )
-    result = update_compression_status_in_db(engine, keys)
+    result = update_compression_status_in_db(engine, keys, DISTRIK)
 
     print(result)
     logger.info("All Done!")
@@ -339,3 +392,4 @@ if __name__ == "__main__":
     setup_logger(LOG_LEVEL, LOG_FILE_PATH, LOG_SIZE_MB, LOG_FILES_TO_KEEP)
     while True:
         main()
+        sleep(SLEEP_DURATION)
