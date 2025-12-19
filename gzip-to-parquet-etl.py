@@ -261,7 +261,7 @@ def get_datalog_from_s3_per_hiveperiod(
     )
     print(s3key_list_string[:100])
     data = conn.sql(f"""
-        SELECT 
+        SELECT
             *,
             '{distrik}' AS dstrct_code,
             CAST(to_timestamp(heartbeat) + INTERVAL 8 HOURS AS DATE) as hiveperiod,
@@ -280,6 +280,24 @@ def get_datalog_from_s3_per_hiveperiod(
 
     logger.info(f"Writing parquet file to target with {row_count} rows")
 
+    conn.execute(f"""
+        COPY (SELECT *,CAST(to_timestamp(heartbeat) + INTERVAL 8 HOURS AS DATE) as hiveperiod FROM data)
+        TO '{targetpath}/datalog'
+        (
+            FORMAT parquet,
+            COMPRESSION snappy
+        )
+    """)
+
+    logger.info("Writing metadata to conversion log")
+
+    conn.execute(f"""
+        COPY (SELECT
+            filename,
+            'SUCCESS' as conversion_status
+        FROM data
+        )
+        TO '{targetpath}/metadata'
     main_query = f"""
         COPY (SELECT * FROM data)
         TO '{targetpath}/datalog' 
