@@ -2,18 +2,21 @@ import json
 import logging
 from contextlib import contextmanager
 from pathlib import Path
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
-import boto3
 import duckdb
-import plotly.express as px
 import streamlit as st
+import polars as pl
+
 
 CREDENTIALS_PATH = "creds/creds.json"
+DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+TIMEZONE = "Asia/Singapore"  # gmt + 8
 
 with open(Path(CREDENTIALS_PATH), "r") as file:
     creds = json.load(file)
     aws_creds = creds["AWS"]
-aws_creds
 aws_creds.pop("aws_bucket")
 
 
@@ -48,30 +51,144 @@ def init_duckdb_connection(aws_credentials: dict, ram_limit: str):
         conn.close()
 
 
-s3 = boto3.client(
-    "s3",
-    aws_access_key_id=aws_creds["aws_access_key_id"],
-    aws_secret_access_key=aws_creds["aws_secret_access_key"],
-    region_name=aws_creds["aws_region"],
-)
-bucket = "smartdbucket"
-obj_key = "datalog/cis_smartd_tbl_iot_scania"
+@st.cache_data
+def get_unit_list(hiveperiod: str, district: str):
+    with init_duckdb_connection(aws_creds, "4GB") as conn:
+        query = f"""
+            SELECT DISTINCT dstrct_code,unitno,deviceid
+            FROM read_parquet('s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania/**/*.parquet',hive_partitioning=true)
+            WHERE hiveperiod = '{hiveperiod}'
+                AND dstrct_code = '{district}'
+            """
+        # st.text(query)
 
-response = s3.list_objects_v2(
-    Bucket=bucket,
-    Prefix=obj_key,
-)
+        df = conn.sql(query).pl()
+        st.text(f"found {len(df)} of unitno")
 
-if "Contents" in response:
-    for obj in response["Contents"]:
-        print(obj["Key"])
-else:
-    print(f"No objects found in '{obj_key}'")
+    return df
 
-with init_duckdb_connection(aws_creds, "4GB") as conn:
-    df = conn.sql("""
-        SELECT *
-        FROM read_parquet('s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania/**/*.parquet',hive_partitioning=true)
-        WHERE hiveperiod BETWEEN '2025-12-11 00:00:00' AND '2025-12-20 00:00:00'
-        """).pl()
-df
+
+@st.cache_data
+def get_s3_datalog(hiveperiod: str, district: str, unitno: list, hour: tuple):
+    if isinstance(unitno, list):
+        unitno = "', '".join(unitno)
+
+    st.text(unitno)
+
+    with init_duckdb_connection(aws_creds, "4GB") as conn:
+        df = (
+            conn.sql(
+                f"""
+            SELECT to_timestamp(heartbeat) as datetime,dstrct_code,hiveperiod,unitno,camcabinstatus,camfrontstatus,gpsspeed,gpsnumsat,VehicleSpeed,speedsource,gpslat,gpslong
+            FROM read_parquet('s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania/**/*.parquet',hive_partitioning=true)
+            WHERE hiveperiod = '{hiveperiod}'
+                AND dstrct_code = '{district}'
+                AND unitno IN ('{unitno}')
+                AND EXTRACT('hour' FROM to_timestamp(heartbeat)+INTERVAL 8 HOUR) BETWEEN {hour[0]} AND {hour[1]}
+            """
+            )
+            .pl()
+            .with_columns(
+                pl.col("datetime").dt.replace_time_zone("UTC"),
+            )
+            .with_columns(
+                pl.col("datetime")
+                .dt.convert_time_zone(TIMEZONE)
+                .alias("datetime_wita"),
+            )
+        )
+
+    return df
+
+
+# ====== LAYOUT ======
+st.title("Smartd MH02 Business Intelligence")
+tab_deviation, tab_speed = st.tabs(["Deviation Analysis", "Speed Analysis"])
+
+# ====== INIT SESSION STATE ======
+if "filter_button_pressed" not in st.session_state:
+    st.session_state.filter_button_pressed = False
+
+if "data_successfully_loaded" not in st.session_state:
+    st.session_state.data_successfully_loaded = False
+
+# ====== MAIN ======
+
+# Default values
+wita_today = datetime.now(ZoneInfo(TIMEZONE))
+districts = ["BRCB", "BRCG"]
+unit_list = ["LD772", "LD782", "LD781"]
+
+# Filter definition
+hiveperiod = st.sidebar.date_input("Hiveperiod: ", None)  # single date
+district = st.sidebar.selectbox("District: ", districts)  # single value
+unitno = st.sidebar.selectbox("Select Unitno: ", unit_list)
+hour = st.sidebar.slider("Hour (WITA): ", 1, 24, (1, 24))  # tuple
+
+st.session_state.filter_button_pressed = st.sidebar.button("Apply Filter!")
+
+if st.session_state.filter_button_pressed:
+    if not st.session_state.data_successfully_loaded:
+        data_load_state = st.text(f"Loading data for {unitno} on {hiveperiod}")
+
+    try:
+        dataframe = None
+        dataframe = get_s3_datalog(hiveperiod, district, unitno, hour)
+    except Exception as e:
+        st.text(f"Exception occured {e}")
+
+    if dataframe is not None and len(dataframe) > 0:
+        st.session_state.data_successfully_loaded = False
+        base_data = (
+            dataframe.with_columns(
+                pl.col("gpsspeed").replace(-9999, -1),
+                pl.col("gpsnumsat").replace(-9999, -1),
+                pl.col("VehicleSpeed").replace(-9999, -1),
+                pl.when(pl.col("gpslat") < -8880)
+                .then(pl.lit("false"))
+                .otherwise(pl.lit("true"))
+                .alias("gpsstatus"),
+                pl.lit(1).alias("constant"),
+            )
+            .with_columns(
+                (pl.col("gpsspeed") - pl.col("VehicleSpeed")).alias("error_rate")
+            )
+            .sort("datetime_wita")
+            .group_by_dynamic("datetime_wita", by=["unitno", "dstrct_code"], every="1m")
+            .agg(
+                pl.col("gpsspeed").mean(),
+                pl.col("VehicleSpeed").mean(),
+                pl.col("error_rate").mean(),
+                pl.col("gpsnumsat").mean(),
+                pl.col("gpsstatus").min(),
+                pl.col("camfrontstatus").min(),
+                pl.col("camcabinstatus").min(),
+                pl.col("constant").mean(),
+            )
+        )
+
+        with tab_deviation:
+            st.text(f"Obtained data with {len(dataframe)} rows")
+            df_data = base_data.select(
+                "datetime_wita",
+                "dstrct_code",
+                "unitno",
+                "gpsstatus",
+                "camcabinstatus",
+                "camfrontstatus",
+            ).with_columns(
+                pl.col("gpsstatus").cast(pl.String),
+                pl.col("camcabinstatus").cast(pl.String),
+                pl.col("camfrontstatus").cast(pl.String),
+            )
+
+            st.dataframe(df_data)
+
+            st.bar_chart(base_data, x="datetime_wita", y="constant", color="gpsstatus")
+
+            st.bar_chart(
+                base_data, x="datetime_wita", y="constant", color="camfrontstatus"
+            )
+            st.bar_chart(
+                base_data, x="datetime_wita", y="constant", color="camcabinstatus"
+            )
