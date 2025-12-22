@@ -32,7 +32,7 @@ TARGET_BUCKET_PATH = "s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania"
 # TARGET_BUCKET_PATH = "data"
 BUCKET_NAME = "smartdbucket"
 SOURCE_KEY_GLOB = "s3://smartdbucket/datalog"
-RAM_LIMIT = "20GB"
+RAM_LIMIT = "10GB"
 KEY_LIMIT_PER_RUN = 2000
 
 # logging parameters
@@ -220,7 +220,7 @@ def get_pending_keys_sql(engine, distrik, file_limit=1000):
                         AND file_path_lokal != 'Minio'
                         AND (compression_status != 'SUCCESS'  OR compression_status IS NULL)
                         AND upload_s3_date >= '2025-12-01 00:00'
-                     ORDER BY upload_s3_date ASC
+                     ORDER BY upload_s3_date DESC
                      """)
     elif distrik == "BRCG":
         query = text(f"""SELECT TOP {file_limit} file_name
@@ -229,7 +229,7 @@ def get_pending_keys_sql(engine, distrik, file_limit=1000):
                             AND (compression_status IS NULL OR compression_status != 'SUCCESS')
                             AND status = 'OK'
                             AND upload_date >= '2025-12-01 00:00'
-                        ORDER BY upload_date ASC
+                        ORDER BY upload_date DESC
                     """)
     else:
         logger.exception("District variable not in 'BRCB' OR 'BRCG'")

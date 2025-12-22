@@ -9,6 +9,8 @@ data/
 creds/
 logs/
 .tmp
+*.ipynb
+explore*
 
 # Virtual environments
 .venv
