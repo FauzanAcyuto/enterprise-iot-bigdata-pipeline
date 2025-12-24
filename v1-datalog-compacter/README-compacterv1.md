@@ -1,6 +1,6 @@
 # Datalog Compacter System - Version 1
 
-![banner](media/data compacter project.png)
+![banner](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/data%20compacter%20project.png)
 
 ## Why?
 
@@ -111,4 +111,4 @@ This is the strong point of pyarrow based systems such as DuckDB or Polars (and 
 
 Using DuckDB relations I never load the data into memory in the course of the script, instead I give duckdb a memory limit (4-20GB) to allow it to process data faster or to preserve resources
 
-![zero-copy](media/zero copy.png)
+![banner](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/zero%20copy.png)
