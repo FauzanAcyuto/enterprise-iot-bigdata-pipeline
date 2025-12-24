@@ -51,16 +51,16 @@ Immense performance improvement:
 
 1. Querying data from the old bucket to the news cut down query times from 15+ minutes to just 2 seconds.
 
-Before:
-![before](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/before.jpeg)
-After:
-![after](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/after.jpeg)
+    Before:
+    ![before](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/before.jpeg)
+    After:
+    ![after](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/after.jpeg)
 
 1. Storage space decreased by 10%
 
-2. A server with 20 GB's of ram can process 3 Million rows of data in <3minst
+1. A server with 20 GB's of ram can process 3 Million rows of data in <3minst
 
-## Technical Decisions & Techiniques
+## Technical Decisions & Techniques
 
 ### Turn the data into parquet format
 
