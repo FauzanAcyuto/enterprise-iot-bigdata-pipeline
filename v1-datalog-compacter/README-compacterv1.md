@@ -62,7 +62,7 @@ Immense performance improvement:
 
 ## Technical Decisions & Techniques
 
-### Turn the data into parquet format
+### 1. Turn the data into parquet format
 
 Now there are a few tools and methods that we can pick here. We know that the data is stored in new line delimited json, schema drift happens very often as updates get rolled out to the devices, and the files are stored in many-many sub folders.
 
@@ -74,7 +74,7 @@ We need a solution that :
 
 A solution that uses pyarrow as its base, supports lazy loading, and parquet transformation. This narrows the candidate to two options, DuckDB and Polars. And I decided to choose duckDB because read_json_auto() handles type errors very well.
 
-### Partition the data properly according to query patterns
+### 2. Partition the data properly according to query patterns
 
 The most common query that happens to this data is:
 
@@ -103,7 +103,7 @@ smartdbucket
 **but wait. why not partition by unitno?**
 This is because partitioning by unitno comes at a trade off. 600 devices means that each hiveperiod will have 600 files of ~20MB files each, this slows down reads as parquet files are more efficient with large file sizes. So well combine all units into one file to get 150-250MB files for each day.
 
-### Enrich data with necesary columns
+### 3. Enrich data with necesary columns
 
 The source data didn't have the two most frequently queried columns either, fortunately adding them is very easy with DuckDB since is based on the SQL syntax
 
@@ -122,7 +122,7 @@ data = conn.sql(
 )
 ```
 
-### Process the data using larger than memory zero-copy architecture
+### 4. Process the data using larger than memory zero-copy architecture
 
 This is the strong point of pyarrow based systems such as DuckDB or Polars (and of course pyspark does it best with 100GB+ datasets).
 
