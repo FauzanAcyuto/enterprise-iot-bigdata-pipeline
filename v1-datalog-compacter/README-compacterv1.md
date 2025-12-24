@@ -22,5 +22,64 @@ smartdbucket
 |   |-...
 |-BRCG
     |-...
+```
+
+There are many issues with this current format:
+
+1. The data is stored as a newline delimited JSON compressed to GZIP - Not the most performative format
+2. The data is stored in many small files (one file per-device per-hour) - Also a big hit on performance
+3. The data is partitioned in a way that makes sense for data production, but not for querying
+4. Querying one weeks worth of data with DuckDB using 4GB's of memory takes a whopping 15 minutes (for a single job site)
+
+**The goal:**
+Turn S3 into a performant datalake where operations team can query 1 days worth of data in seconds to make quick decisions in the field (Speed, safety, location, device health information)
+
+## How?
+
+We will be implementing the following solutions to achieve that goal:
+
+1. Turn the data into parquet format
+2. Partition the data properly according to query patterns
+3. Enrich the data with the necessary columns
+4. Process the data using larger-than-memory, Zero-copy architecture for maximum efficiency (cost, time, resources)
+
+### Turn the data into parquet format
+
+Now there are a few tools and methods that we can pick here. We know that the data is stored in new line delimited json, schema drift happens very often as updates get rolled out to the devices, and the files are stored in many-many sub folders.
+
+We need a solution that :
+
+1. Allows us to 'glob' files out of S3
+2. Allows larger-than-memory Zero-copy data processing
+3. Can handle type errors gracefully (since actual real life data is always dirty)
+
+A solution that uses pyarrow as its base, supports lazy loading, and parquet transformation. This narrows the candidate to two options, DuckDB and Polars. And I decided to choose duckDB because read_json_auto() handles type errors very well.
+
+### Partition the data properly according to query patterns
+
+The most common query that happens to this data is:
+
+```sql
+SELECT *
+FROM table
+WHERE 1=1
+  AND hiveperiod = '2025-12-12'
+  AND distrik = 'BRCB'
+  AND unitno = 'DTxxxx'
 
 ```
+
+With date filtering happening much more often than district, in this case the partition should look like this:
+
+```
+smartdbucket
+|-hiveperiod=2025-12-12 # by date, not date hour
+|           |-district=BRCB
+|           |        |-data_{uid}.parquet
+|           |-district=BRCG
+|           |-...
+|-hiveperiod=2025-12-13
+```
+
+but wait. why not partition by unitno?
+This is because partitioning by unitno comes at a trade off. 600 devices means that each hiveperiod will have 600 files of ~20MB files each, this slows down reads as parquet files are more efficient with large file sizes. So well combine all units into one file to get 150-250MB files for each day.
