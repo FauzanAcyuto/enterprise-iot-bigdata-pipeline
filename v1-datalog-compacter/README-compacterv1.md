@@ -45,6 +45,20 @@ We will be implementing the following solutions to achieve that goal:
 3. Enrich the data with the necessary columns
 4. Process the data using larger-than-memory, Zero-copy architecture for maximum efficiency (cost, time, resources)
 
+## The results?
+
+Immense performance improvement:
+
+1. Querying data from the old bucket to the news cut down query times from 15+ minutes to just 2 seconds.
+Before:
+![before](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/before.jpeg)
+After:
+![after](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/after.jpeg)
+2. Storage space decreased by 10%
+3. A server with 20 GB's of ram can process 3 Million rows of data in <3minst
+
+## Technical Decisions & Techiniques
+
 ### Turn the data into parquet format
 
 Now there are a few tools and methods that we can pick here. We know that the data is stored in new line delimited json, schema drift happens very often as updates get rolled out to the devices, and the files are stored in many-many sub folders.
@@ -83,7 +97,7 @@ smartdbucket
 |-hiveperiod=2025-12-13
 ```
 
-but wait. why not partition by unitno?
+**but wait. why not partition by unitno?**
 This is because partitioning by unitno comes at a trade off. 600 devices means that each hiveperiod will have 600 files of ~20MB files each, this slows down reads as parquet files are more efficient with large file sizes. So well combine all units into one file to get 150-250MB files for each day.
 
 ### Enrich data with necesary columns
@@ -111,4 +125,4 @@ This is the strong point of pyarrow based systems such as DuckDB or Polars (and 
 
 Using DuckDB relations I never load the data into memory in the course of the script, instead I give duckdb a memory limit (4-20GB) to allow it to process data faster or to preserve resources
 
-![banner](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/zero%20copy.png)
+![zeo-copy](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/zero%20copy.png)
