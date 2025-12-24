@@ -11,6 +11,8 @@ logs/
 .tmp
 *.ipynb
 explore*
+.DS_Store
+
 
 # Virtual environments
 .venv
