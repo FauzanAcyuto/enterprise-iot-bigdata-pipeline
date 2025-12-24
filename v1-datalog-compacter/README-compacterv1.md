@@ -55,8 +55,10 @@ Before:
 ![before](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/before.jpeg)
 After:
 ![after](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/after.jpeg)
-2. Storage space decreased by 10%
-3. A server with 20 GB's of ram can process 3 Million rows of data in <3minst
+
+1. Storage space decreased by 10%
+
+2. A server with 20 GB's of ram can process 3 Million rows of data in <3minst
 
 ## Technical Decisions & Techiniques
 
