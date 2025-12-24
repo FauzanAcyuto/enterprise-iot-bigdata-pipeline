@@ -35,6 +35,7 @@ def init_duckdb_connection(aws_credentials: dict, ram_limit: str):
     try:
         logger.info("Initializing duckdb connection to S3")
         conn = duckdb.connect()
+        conn.execute("SET TimeZone = 'UTC';")
         conn.execute("INSTALL httpfs;")
         conn.execute("LOAD httpfs;")
         conn.execute(f"SET memory_limit = '{ram_limit}'")
@@ -79,12 +80,12 @@ def get_s3_datalog(hiveperiod: str, district: str, unitno: list, hour: tuple):
         df = (
             conn.sql(
                 f"""
-            SELECT to_timestamp(heartbeat) as datetime,dstrct_code,hiveperiod,unitno,camcabinstatus,camfrontstatus,gpsspeed,gpsnumsat,VehicleSpeed,speedsource,gpslat,gpslong
+            SELECT to_timestamp(heartbeat) as datetime,heartbeat,dstrct_code,hiveperiod,unitno,camcabinstatus,camfrontstatus,gpsspeed,gpsnumsat,VehicleSpeed,speedsource,gpslat,gpslong
             FROM read_parquet('s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania/**/*.parquet',hive_partitioning=true)
             WHERE hiveperiod = '{hiveperiod}'
                 AND dstrct_code = '{district}'
                 AND unitno IN ('{unitno}')
-                AND EXTRACT('hour' FROM to_timestamp(heartbeat)+INTERVAL 8 HOUR) BETWEEN {hour[0]} AND {hour[1]}
+                AND DATE_PART('hour', to_timestamp(heartbeat)+ INTERVAL 8 HOUR) BETWEEN {hour[0]} AND {hour[1]}
             """
             )
             .pl()
@@ -92,9 +93,7 @@ def get_s3_datalog(hiveperiod: str, district: str, unitno: list, hour: tuple):
                 pl.col("datetime").dt.replace_time_zone("UTC"),
             )
             .with_columns(
-                pl.col("datetime")
-                .dt.convert_time_zone(TIMEZONE)
-                .alias("datetime_wita"),
+                (pl.col("datetime") + pl.duration(hours=8)).alias("datetime_wita"),
             )
         )
 
@@ -117,7 +116,7 @@ if "data_successfully_loaded" not in st.session_state:
 # Default values
 wita_today = datetime.now(ZoneInfo(TIMEZONE))
 districts = ["BRCB", "BRCG"]
-unit_list = ["LD772", "LD782", "LD781"]
+unit_list = ["LD772", "LD782", "LD781", "PM1582", "PM1598", "PM189"]
 
 # Filter definition
 hiveperiod = st.sidebar.date_input("Hiveperiod: ", None)  # single date
@@ -151,10 +150,12 @@ if st.session_state.filter_button_pressed:
                 pl.lit(1).alias("constant"),
             )
             .with_columns(
-                (pl.col("gpsspeed") - pl.col("VehicleSpeed")).alias("error_rate")
+                (pl.col("gpsspeed") - pl.col("VehicleSpeed")).abs().alias("error_rate")
             )
             .sort("datetime_wita")
-            .group_by_dynamic("datetime_wita", by=["unitno", "dstrct_code"], every="1m")
+            .group_by_dynamic(
+                "datetime_wita", by=["unitno", "dstrct_code", "hiveperiod"], every="1m"
+            )
             .agg(
                 pl.col("gpsspeed").mean(),
                 pl.col("VehicleSpeed").mean(),
@@ -164,22 +165,27 @@ if st.session_state.filter_button_pressed:
                 pl.col("camfrontstatus").min(),
                 pl.col("camcabinstatus").min(),
                 pl.col("constant").mean(),
+                pl.col("speedsource").min(),
             )
         )
 
         with tab_deviation:
+            st.dataframe(dataframe)
             st.text(f"Obtained data with {len(dataframe)} rows")
-            df_data = base_data.select(
-                "datetime_wita",
-                "dstrct_code",
-                "unitno",
-                "gpsstatus",
-                "camcabinstatus",
-                "camfrontstatus",
-            ).with_columns(
-                pl.col("gpsstatus").cast(pl.String),
-                pl.col("camcabinstatus").cast(pl.String),
-                pl.col("camfrontstatus").cast(pl.String),
+            df_data = (
+                base_data.select(
+                    "datetime_wita",
+                    "dstrct_code",
+                    "unitno",
+                    "gpsstatus",
+                    "camcabinstatus",
+                    "camfrontstatus",
+                ).with_columns(
+                    pl.col("gpsstatus").cast(pl.String),
+                    pl.col("camcabinstatus").cast(pl.String),
+                    pl.col("camfrontstatus").cast(pl.String),
+                )
+                # .with_columns(pl.col("datetime_wita").dt.replace_time_zone(None)),
             )
 
             st.dataframe(df_data)
@@ -191,4 +197,34 @@ if st.session_state.filter_button_pressed:
             )
             st.bar_chart(
                 base_data, x="datetime_wita", y="constant", color="camcabinstatus"
+            )
+
+        with tab_speed:
+            st.text(f"Obtained data with {len(dataframe)} rows")
+            speed_df_data = base_data.select(
+                "hiveperiod",
+                "datetime_wita",
+                "dstrct_code",
+                "unitno",
+                "speedsource",
+                "VehicleSpeed",
+                "gpsspeed",
+                "gpsnumsat",
+                "error_rate",
+                "constant",
+            )  # .with_columns(pl.col("datetime_wita").dt.replace_time_zone(None))
+
+            st.dataframe(speed_df_data)
+            st.bar_chart(
+                speed_df_data, x="datetime_wita", y="constant", color="speedsource"
+            )
+            st.line_chart(
+                speed_df_data,
+                x="datetime_wita",
+                y=["VehicleSpeed", "gpsspeed", "gpsnumsat"],
+            )
+            st.line_chart(
+                speed_df_data,
+                x="datetime_wita",
+                y=["error_rate", "gpsnumsat"],
             )
