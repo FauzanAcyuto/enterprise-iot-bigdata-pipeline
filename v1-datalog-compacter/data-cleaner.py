@@ -4,6 +4,7 @@ import logging
 
 from contextlib import contextmanager
 import duckdb
+import boto3
 
 # ======= CONFIGURATION =======
 CREDENTIALS_PATH = "creds/creds.json"
@@ -78,6 +79,15 @@ def get_s3_datalog():
         return None
 
 
+def list_s3_keys_within_hivepartitions(creds, bucketname, prefix, hive_partitions=None):
+    logger = logging.getLogger(__name__)
+
+    client = boto3.client("s3", **creds)
+
+    response = client.list_objects_v2(bucketname, prefix=prefix)
+    return
+
+
 def main():
     # 1. Make a list of keys to fix
     # 1.1 Iterate list_objects from boto3 on output.csv and get keys list
@@ -85,7 +95,8 @@ def main():
     # 3. Repartition the data
     # 4. Delete the keys
     # 5. Validate the output
-    get_s3_datalog()
+
+    # get_s3_datalog()
     return None
 
 
