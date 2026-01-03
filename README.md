@@ -37,7 +37,73 @@ This prompted the project that I am showcasing, I coordinated with stakeholders 
 
 | Component | Description | Tech Stack | Status |
 |-----------|-------------|------------|--------|
-| [v-basic-etl](./v1-basic-etl/README-compacterv1.md) | Initial pipeline with limitations | Python, Polars, DuckDB | ✅ Complete |
+| [v1-basic-etl](./v1-basic-etl/README-compacterv1.md) | Initial pipeline with limitations | Python, Polars, DuckDB | ✅ Complete |
 | [v2-orchestrated-pipeline](./v2-orchestrated-pipeline) | Production-grade with orchestration | Airflow, dbt, Docker |  In Progress |
 | [streamlit-dashboard](./streamlit-dashboard) | Operational analytics UI | Streamlit, Plotly | ✅ Complete |
 | [docs](./docs) | Architecture & design decisions | Markdown, diagrams | ✅ Complete |
+
+## 🚀 Project Evolution
+
+This project evolved from a quick script to a production-ready system. The journey is documented to show engineering maturity and iterative improvement.
+
+### V1: Basic ETL
+
+The initial implementation that got the job done, but had limitations:
+
+- ✅ Functional TXT → Parquet conversion
+- ✅ Handles 1.8M records/hour
+- ❌ Manual scheduling in script
+- ❌ No data validation
+- ❌ 24 small files per partition (query performance hit)
+
+### V2: Production Pipeline
+
+Enterprise-grade solution addressing all V1 limitations:
+
+- ✅ Airflow DAGs (scheduled, monitored, alerting)
+- ✅ dbt transforms + data quality tests
+- ✅ Automatic daily compaction (24 files → 1)
+- ✅ Malformed file handling + notifications
+- ✅ Timezone-agnostic (UTC internal, convert at display)
+- ✅ Zero-copy architecture preserved
+
+| Decision | Why | Tradeoff |
+|----------|-----|----------|
+| **Batch upload over MQTT** | Prioritize throughput for analytics workloads | Higher latency, but 99% data availability during outages |
+| **Zero-copy (Polars + DuckDB)** | Process larger-than-memory data on suboptimal hardware | Requires understanding lazy evaluation patterns |
+| **UTC internal timestamps** | Server-agnostic processing | Display timezone conversion at presentation layer |
+| **Hourly Parquet + daily compaction** | Balance data freshness vs query performance | Two-stage pipeline adds complexity |
+| **Database-based state tracking** | Know what's processed vs pending | Database connection to maintain |
+
+## 🔧 Tech Stack
+
+**Processing:**
+![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
+![Polars](https://img.shields.io/badge/Polars-CD792C?style=flat-square&logo=polars&logoColor=white)
+![DuckDB](https://img.shields.io/badge/DuckDB-FFF000?style=flat-square&logo=duckdb&logoColor=black)
+
+**Orchestration & Transforms:**
+![Airflow](https://img.shields.io/badge/Airflow-017CEE?style=flat-square&logo=apacheairflow&logoColor=white)
+![dbt](https://img.shields.io/badge/dbt-FF694B?style=flat-square&logo=dbt&logoColor=white)
+
+**Infrastructure:**
+![AWS S3](https://img.shields.io/badge/S3-569A31?style=flat-square&logo=amazons3&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
+
+**Visualization:**
+![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)
+
+## 🤝 About This Project
+
+This is a portfolio project demonstrating production data engineering practices. It's based on real-world experience managing 500+ IoT edge devices, adapted for public sharing.
+
+**Built as part of my transition to the Australian data market.**
+
+---
+
+## 👤 Author
+
+**Fauzan Acyuto**
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/fauzan-actyuto)
+[![Email](https://img.shields.io/badge/Email-EA4335?style=for-the-badge&logo=gmail&logoColor=white)](mailto:acyuto.professional@gmail.com)

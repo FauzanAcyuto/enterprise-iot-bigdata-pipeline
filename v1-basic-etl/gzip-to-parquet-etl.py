@@ -220,16 +220,32 @@ def get_datalog_from_s3_per_hiveperiod(
         f"['s3://{bucket_name}/" + f"', 's3://{bucket_name}/".join(s3key_list) + "']"
     )
     print(s3key_list_string[:100])
-    data = conn.sql(
-        f"""
+
+    query = f"""
         SELECT 
             *,
             '{distrik}' AS dstrct_code,
-            CAST(to_timestamp(heartbeat) + INTERVAL 8 HOURS AS DATE) as hiveperiod,
+            CAST(
+                CASE
+                    WHEN heartbeat < 10000000000 THEN make_timestamp(CAST(heartbeat * 1000000 as BIGINT) )
+                    WHEN heartbeat < 10000000000000 THEN make_timestamp(CAST(heartbeat * 1000 as BIGINT))
+                    WHEN heartbeat < 10000000000000000 THEN make_timestamp(CAST(heartbeat as BIGINT))
+                    ELSE make_timestamp(CAST(heartbeat / 1000as BIGINT))
+                END + INTERVAL 8 HOURS
+            AS DATE) as hiveperiod,
+            CAST(
+                CASE
+                    WHEN heartbeat < 10000000000 THEN make_timestamp(CAST(heartbeat * 1000000 as BIGINT) )
+                    WHEN heartbeat < 10000000000000 THEN make_timestamp(CAST(heartbeat * 1000 as BIGINT))
+                    WHEN heartbeat < 10000000000000000 THEN make_timestamp(CAST(heartbeat as BIGINT))
+                    ELSE make_timestamp(CAST(heartbeat / 1000as BIGINT))
+                END + INTERVAL 8 HOURS
+            AS DATETIME) as datetime_wita,
             filename AS source_file
         FROM read_json_auto({s3key_list_string}, filename=true, sample_size=-1, union_by_name=true)
     """
-    )
+
+    data = conn.sql(query)
 
     logger.info("Got the main data from s3")
 
@@ -242,13 +258,15 @@ def get_datalog_from_s3_per_hiveperiod(
 
     logger.info(f"Writing parquet file to target with {row_count} rows")
 
+    filename_pattern = "standard_{uuid}"
     main_query = f"""
         COPY (SELECT * FROM data)
-        TO '{targetpath}/datalog' 
+        TO '{targetpath}/datalog_v2' 
         (
             FORMAT parquet,
             COMPRESSION snappy,
             PARTITION_BY (hiveperiod,dstrct_code),
+            FILENAME_PATTERN '{filename_pattern}',
             APPEND
         )
     """
@@ -327,4 +345,3 @@ if __name__ == "__main__":
     while True:
         main()
         sleep(SLEEP_DURATION)
-
