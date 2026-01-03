@@ -4,7 +4,7 @@
 
 ![banner](https://github.com/FauzanAcyuto/enterprise-iot-bigdata-pipeline/blob/master/media/banner.png)
 
-## Overview
+## 📖Overview
 
 At pamapersada, the largest mining contractor in Indonesia, constant RnD is always happening to develop solutions for complex mining requirements. One of the most complex is safety and productivity. For this my team and I developed *Mata Hati 02* (The Hearts Eyes) which are Edge computing IoT Devices installed in heavy machinery such as: Dump Trucks, Coal Trucks,  Busses, Water Trucks, and many more.
 
@@ -16,20 +16,20 @@ This caused availability issues with network outages that broke the pipeline in 
 
 This prompted the project that I am showcasing, I coordinated with stakeholders to make architectural decision trade-offs, architected the system, lead two developers, and built the code you see here.
 
-## Impact
+## 🔥Impact
 
 - Increased data delivery from 30% -> 80% (ongoing project to 100%)
 - Increased pipeline availability from 40% -> 90% (in network constrained areas in Borneo)
 - Increased data read performance from 15min+ -> 2 seconds (partition improvement + cloud migration)
 
-## Highlights
+## 💡Highlights
 
 - **Zero-copy architecture** — Polars + DuckDB for memory-efficient processing
 - **Airflow orchestration** — Scheduled, monitored, with alerting
 - **dbt transforms** — Data quality tests and auto-generated documentation
 - **Evolution story** — From basic script to production pipeline
 
-## Architecture
+## 🏗️Architecture
 
 ![architecture](https://github.com/FauzanAcyuto/enterprise-iot-bigdata-pipeline/blob/master/media/detailed-architecture.png)
 
