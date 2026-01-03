@@ -1,6 +1,7 @@
 # Enterprise IoT BigData Pipeline
 
 > End-to-end data pipeline processing 1.8M records/hour from edge devices to analytics dashboard.
+**Built for mining operations in Borneo | 600+ devices | Real production system**
 
 ![banner](https://github.com/FauzanAcyuto/enterprise-iot-bigdata-pipeline/blob/master/media/banner.png)
 
@@ -107,5 +108,5 @@ This is a portfolio project demonstrating production data engineering practices.
 
 **Fauzan Acyuto**
 
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/fauzan-actyuto)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/fauzan-acyuto)
 [![Email](https://img.shields.io/badge/Email-EA4335?style=for-the-badge&logo=gmail&logoColor=white)](mailto:acyuto.professional@gmail.com)

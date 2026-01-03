@@ -2,7 +2,7 @@
 
 ![banner](https://github.com/FauzanAcyuto/enterprise-iot-bigdata-pipeline/blob/master/v1-basic-etl/media/data%20compacter%20project.png)
 
-## Why?
+## 🕊️Why?
 
 In Mata Hati 02 (My Smart Mining IoT Project) we had 600+ devices installed across two job sites, these devices each generate 1 row per second containing telemetry from various sensors (179 fields) which comes out to around 2.16 Million rows per hour.
 
@@ -36,7 +36,7 @@ There are many issues with this current format:
 **The goal:**
 Turn S3 into a performant datalake where operations team can query 1 days worth of data in seconds to make quick decisions in the field (Speed, safety, location, device health information)
 
-## How?
+## ✊How?
 
 We will be implementing the following solutions to achieve that goal:
 
@@ -45,7 +45,7 @@ We will be implementing the following solutions to achieve that goal:
 3. Enrich the data with the necessary columns
 4. Process the data using larger-than-memory, Zero-copy architecture for maximum efficiency (cost, time, resources)
 
-## The results?
+## 🔥The results?
 
 Immense performance improvement:
 
@@ -58,9 +58,9 @@ Immense performance improvement:
 
 1. Storage space decreased by 10%
 
-1. A server with 20 GB's of ram can process 3 Million rows of data in <3minst
+1. A server with 20 GB's of ram can process 3 Million rows of data in <3 minutess
 
-## Technical Decisions & Techniques
+## 🖊️Technical Decisions & Techniques
 
 ### 1. Turn the data into parquet format
 
@@ -129,3 +129,12 @@ This is the strong point of pyarrow based systems such as DuckDB or Polars (and 
 Using DuckDB relations I never load the data into memory in the course of the script, instead I give duckdb a memory limit (4-20GB) to allow it to process data faster or to preserve resources
 
 ![zero-copy](https://github.com/FauzanAcyuto/enterprise-iot-bigdata-pipeline/blob/master/v1-basic-etl/media/zero%20copy.png)
+
+## ⚠️ V1 Limitations
+
+These limitations led to the development of [V2](../v2-orchestrated-pipeline):
+
+- **Manual execution** — No scheduling, must run by hand
+- **No validation** — Malformed files can break the pipeline
+- **No state tracking** — Risk of reprocessing or missing files
+- **24 files per partition** — Hourly files not yet compacted to daily
