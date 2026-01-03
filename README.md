@@ -67,6 +67,8 @@ Enterprise-grade solution addressing all V1 limitations:
 - ✅ Timezone-agnostic (UTC internal, convert at display)
 - ✅ Zero-copy architecture preserved
 
+## ✏️Key Technical Decision
+
 | Decision | Why | Tradeoff |
 |----------|-----|----------|
 | **Batch upload over MQTT** | Prioritize throughput for analytics workloads | Higher latency, but 99% data availability during outages |
