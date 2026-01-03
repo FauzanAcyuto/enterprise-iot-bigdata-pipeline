@@ -4,7 +4,7 @@
 
 ## 🕊️Why?
 
-In Mata Hati 02 (My Smart Mining IoT Project) we had 600+ devices installed across two job sites, these devices each generate 1 row per second containing telemetry from various sensors (179 fields) which comes out to around 2.16 Million rows per hour.
+In Mata Hati 02 (My Smart Mining IoT Project) we had 500+ devices installed across two job sites, these devices each generate 1 row per second containing telemetry from various sensors (179 fields) which comes out to around 2.16 Million rows per hour.
 
 This kind of throughput needed to happen in the middle of the Borneo jungle with frequent network outages, areas that has poor coverage, and other environmental challenges.
 
