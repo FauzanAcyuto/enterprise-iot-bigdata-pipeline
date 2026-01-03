@@ -1,6 +1,6 @@
 # Datalog Compacter System - Version 1
 
-![banner](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/data%20compacter%20project.png)
+![banner](https://github.com/FauzanAcyuto/enterprise-iot-bigdata-pipeline/blob/master/v1-basic-etl/media/data%20compacter%20project.png)
 
 ## Why?
 
@@ -52,9 +52,9 @@ Immense performance improvement:
 1. Querying data from the old bucket to the news cut down query times from 15+ minutes to just 2 seconds.
 
     Before:
-    ![before](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/before.jpeg)
+    ![before](https://github.com/FauzanAcyuto/enterprise-iot-bigdata-pipeline/blob/master/v1-basic-etl/media/before.jpeg)
     After:
-    ![after](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/after.jpeg)
+    ![after](https://github.com/FauzanAcyuto/enterprise-iot-bigdata-pipeline/blob/master/v1-basic-etl/media/after.jpeg)
 
 1. Storage space decreased by 10%
 
@@ -128,4 +128,4 @@ This is the strong point of pyarrow based systems such as DuckDB or Polars (and 
 
 Using DuckDB relations I never load the data into memory in the course of the script, instead I give duckdb a memory limit (4-20GB) to allow it to process data faster or to preserve resources
 
-![zeo-copy](https://github.com/FauzanAcyuto/iot-bigdata-streamlit-dashboard/blob/master/v1-datalog-compacter/media/zero%20copy.png)
+![zero-copy](https://github.com/FauzanAcyuto/enterprise-iot-bigdata-pipeline/blob/master/v1-basic-etl/media/zero%20copy.png)
