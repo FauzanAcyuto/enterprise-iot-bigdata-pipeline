@@ -12,6 +12,7 @@ logs/
 *.ipynb
 explore*
 .DS_Store
+*.csv
 
 
 # Virtual environments
