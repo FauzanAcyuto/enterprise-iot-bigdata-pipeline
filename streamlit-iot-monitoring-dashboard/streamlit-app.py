@@ -57,7 +57,7 @@ def get_unit_list(hiveperiod: str, district: str):
     with init_duckdb_connection(aws_creds, "4GB") as conn:
         query = f"""
             SELECT DISTINCT dstrct_code,unitno,deviceid
-            FROM read_parquet('s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania/**/*.parquet',hive_partitioning=true)
+            FROM read_parquet('s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania/datalog_v2/**/*.parquet',hive_partitioning=true)
             WHERE hiveperiod = '{hiveperiod}'
                 AND dstrct_code = '{district}'
             """
@@ -76,18 +76,18 @@ def get_s3_datalog(hiveperiod: str, district: str, unitno: list, hour: tuple):
 
     st.text(unitno)
 
-    with init_duckdb_connection(aws_creds, "4GB") as conn:
-        df = (
-            conn.sql(
-                f"""
+    query = f"""
             SELECT to_timestamp(heartbeat) as datetime,heartbeat,dstrct_code,hiveperiod,unitno,camcabinstatus,camfrontstatus,gpsspeed,gpsnumsat,VehicleSpeed,speedsource,gpslat,gpslong
-            FROM read_parquet('s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania/**/*.parquet',hive_partitioning=true)
+            FROM read_parquet('s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania/datalog_v2/**/*.parquet',hive_partitioning=true)
             WHERE hiveperiod = '{hiveperiod}'
                 AND dstrct_code = '{district}'
                 AND unitno IN ('{unitno}')
                 AND DATE_PART('hour', to_timestamp(heartbeat)+ INTERVAL 8 HOUR) BETWEEN {hour[0]} AND {hour[1]}
             """
-            )
+
+    with init_duckdb_connection(aws_creds, "4GB") as conn:
+        df = (
+            conn.sql(query)
             .pl()
             .with_columns(
                 pl.col("datetime").dt.replace_time_zone("UTC"),
