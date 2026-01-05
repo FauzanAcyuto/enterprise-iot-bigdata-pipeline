@@ -53,7 +53,7 @@ The initial implementation that got the job done, but had limitations:
 
 - ✅ Functional TXT → Parquet conversion
 - ✅ Handles 1.8M records/hour
-- ❌ Manual scheduling in script
+- ❌ Manual scheduling in script as a long-running process
 - ❌ No data validation
 - ❌ 24 small files per partition (query performance hit)
 
