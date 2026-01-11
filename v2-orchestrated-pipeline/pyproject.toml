@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "apache-airflow-providers-amazon>=9.19.0",
     "boto3>=1.42.21",
     "duckdb>=1.4.3",
     "sqlalchemy>=2.0.45",
