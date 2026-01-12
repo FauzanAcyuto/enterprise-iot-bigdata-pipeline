@@ -22,8 +22,10 @@ explore.ipynb
 # Airflow configuration and databases
 airflow.cfg
 unittests.cfg
-airflow.db
+airflow.db*
 unittests.db
+*password*
+creds*
 
 # Airflow temporary artifacts and runtime files
 /logs/

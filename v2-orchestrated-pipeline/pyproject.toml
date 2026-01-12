@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "apache-airflow-providers-amazon>=9.19.0",
+    "apache-airflow-providers-microsoft-mssql>=4.4.0",
+    "apache-airflow[amazon]>=3.1.5",
     "boto3>=1.42.21",
     "duckdb>=1.4.3",
     "sqlalchemy>=2.0.45",

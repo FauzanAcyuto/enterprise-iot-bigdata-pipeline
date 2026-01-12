@@ -170,6 +170,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/e4/4e/430de7acec52b97ac960b28bd20645540015779fb258a375e86e39d6cdb4/apache_airflow-3.1.5-py3-none-any.whl", hash = "sha256:cf2316a819d8888d05249488d38e977d6f1ccb4c8d310b55fd4361e3107383e7", size = 12721, upload-time = "2025-12-12T21:36:54.736Z" },
 ]
 
+[package.optional-dependencies]
+amazon = [
+    { name = "apache-airflow-providers-amazon" },
+]
+
 [[package]]
 name = "apache-airflow-core"
 version = "3.1.5"
@@ -329,6 +334,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ee/cf/3a541e8813e98d62050c5bf882809eaae672246cd990fb1dd9cebd2e6126/apache_airflow_providers_http-5.6.2.tar.gz", hash = "sha256:0978295a2fade7386a2cda80d524f74366a3faf36530aa08665250de650b2f24", size = 69736, upload-time = "2026-01-02T17:36:27.855Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a7/60/8fbc1eaf7a8260c90a6988d5276cb47d09f0c963b4a0f97092ce4785937a/apache_airflow_providers_http-5.6.2-py3-none-any.whl", hash = "sha256:c8063b7ddc4af94f1f11dc7e0cfcdb1fa7367e7267ad7be36807b4b7f21cfbda", size = 33487, upload-time = "2026-01-02T17:35:38.283Z" },
+]
+
+[[package]]
+name = "apache-airflow-providers-microsoft-mssql"
+version = "4.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "apache-airflow" },
+    { name = "apache-airflow-providers-common-sql" },
+    { name = "methodtools" },
+    { name = "pymssql" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/95/92/ee2e12570ccf0cfe492e9fd37fa7a22c8721ab5d627d904e16bd627eb9f3/apache_airflow_providers_microsoft_mssql-4.4.0.tar.gz", hash = "sha256:ffdc9428f09b81dfb63a1438b0d399866f486bc6c6a6fe1f16a096072d05ceb7", size = 56072, upload-time = "2025-11-30T22:18:29.716Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a1/e1/1454b97d0bcfa61c4cafd131765f0d76c026919fb72fd907bcc92af86b8e/apache_airflow_providers_microsoft_mssql-4.4.0-py3-none-any.whl", hash = "sha256:2af3c11875720f6897efe487f478706f20d6485917b52b83e560e2deada020a3", size = 14993, upload-time = "2025-11-30T22:17:00.332Z" },
 ]
 
 [[package]]
@@ -3231,7 +3251,9 @@ name = "v2-orchestrated-pipeline"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "apache-airflow", extra = ["amazon"] },
     { name = "apache-airflow-providers-amazon" },
+    { name = "apache-airflow-providers-microsoft-mssql" },
     { name = "boto3" },
     { name = "duckdb" },
     { name = "sqlalchemy" },
@@ -3239,7 +3261,9 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "apache-airflow", extras = ["amazon"], specifier = ">=3.1.5" },
     { name = "apache-airflow-providers-amazon", specifier = ">=9.19.0" },
+    { name = "apache-airflow-providers-microsoft-mssql", specifier = ">=4.4.0" },
     { name = "boto3", specifier = ">=1.42.21" },
     { name = "duckdb", specifier = ">=1.4.3" },
     { name = "sqlalchemy", specifier = ">=2.0.45" },

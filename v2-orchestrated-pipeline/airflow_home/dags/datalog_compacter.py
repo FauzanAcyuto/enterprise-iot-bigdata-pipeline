@@ -2,10 +2,12 @@ from contextlib import contextmanager
 from pathlib import Path
 import logging
 from datetime import datetime, timedelta
+import json
 
 import duckdb
 from sqlalchemy import text
 from airflow.sdk import dag, task
+from airflow.hooks.base import BaseHook
 from airflow.models import Param
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.providers.microsoft.mssql.hooks.mssql import MsSqlHook
@@ -217,9 +219,9 @@ def update_compression_status_in_db(engine, keys: list, distrik: str):
 def compacter():
 
     @task
-    def get_keys():
+    def get_keys(**context):
         hook = MsSqlHook(mssql_conn_id="mssql_pama_compacter")
-        hook.get_sqlalchemy_engine()
+        engine = hook.get_sqlalchemy_engine()
         keys = get_pending_keys_sql(
             engine, params["distrik"], params["key_limit_per_run"]
         )
@@ -227,18 +229,30 @@ def compacter():
         return keys
 
     @task
-    def compact(keys: list):
+    def compact(keys: list, **context):
+        logger = logging.getLogger(__name__)
+        conn = BaseHook.get_connection("aws-creds")
+        aws_creds = {
+            "aws_secret_access_key": conn.extra_dejson.get("aws_secret_access_key"),
+            "aws_access_key_id": conn.extra_dejson.get("aws_access_key_id"),
+            "aws_region": conn.extra_dejson.get("aws_region"),
+        }
+
         params = context["params"]
         if len(keys) == 0:
             return 0
 
         with init_duckdb_connection(aws_creds, params["ram_limit"]) as conn:
-            get_datalog_from_s3_per_hiveperiod(
-                conn, BUCKET_NAME, keys, params["target_path"], params["distrik"]
-            )
+            try:
+                get_datalog_from_s3_per_hiveperiod(
+                    conn, BUCKET_NAME, keys, params["target_path"], params["distrik"]
+                )
+                return keys
+            except Exception:
+                logger.exception("Exception occured in compact task")
 
     @task
-    def update_status(keys: list):
+    def update_status(keys: list, **context):
         """Mark keys as processed in SQL Server."""
         if len(keys) == 0:
             return 0
@@ -251,8 +265,8 @@ def compacter():
         update_compression_status_in_db(engine, keys, params["distrik"])
 
     keys = get_keys()
-    compact(keys)
-    update_status(keys)
+    result = compact(keys)
+    update_status(result)
 
 
 compacter()
