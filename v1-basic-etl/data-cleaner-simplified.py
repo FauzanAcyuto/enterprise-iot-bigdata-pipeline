@@ -9,7 +9,7 @@ import duckdb
 import polars as pl
 
 # ======= CONFIGURATION =======
-CREDENTIALS_PATH = "creds/creds.json"
+CREDENTIALS_PATH = "../creds/creds.json"
 with open(Path(CREDENTIALS_PATH), "r") as file:
     creds = json.load(file)
     cred = creds["AWS"]
@@ -19,6 +19,7 @@ aws_creds = {key: value for key, value in cred.items() if key in keys_to_keep}
 
 BUCKET_NAME = "smartdbucket"
 PREFIX = "datalog/cis_smartd_tbl_iot_scania/"
+TARGET_BUCKET_PATH = "s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania"
 
 # logging parameters
 LOG_LEVEL = logging.INFO
@@ -27,7 +28,6 @@ LOG_SIZE_MB = 1
 LOG_FILES_TO_KEEP = 5
 
 
-# ====== FUNCTION DECLARATION ======
 def setup_logger(loglevel, log_file, logsize, files_to_keep):
     """
     loglevel(obj) = log level object (logging.INFO)
@@ -90,7 +90,7 @@ def init_duckdb_connection(aws_credentials: dict, ram_limit: str):
         conn.close()
 
 
-def get_s3_datalog(target_file_path: str):
+def get_invalid_hiveperiods(target_file_path: str):
     with init_duckdb_connection(aws_creds, "4GB") as conn:
         data = conn.sql(
             """
@@ -119,35 +119,7 @@ def get_s3_datalog(target_file_path: str):
         return df.get_column("hiveperiod").to_list()
 
 
-def get_target_keys_by_partition(data: list, hiveperiods: list):
-    logger = logging.getLogger(__name__)
-    df = pl.from_dicts(data)
-
-    logger.info(f"Obtained base dataframe of {len(df)}")
-    df = df.with_columns(
-        pl.col("Key")
-        .str.splitn("/", 7)
-        .alias("list_substr_key")
-        .struct.rename_fields(
-            ["prefix1", "prefix2", "prefix3", "hiveperiod", "dstrct_code", "filename"]
-        )
-        .alias("fields")
-        # pl.col("Key").str.split("/").list.get(2).alias("hiveperiod"),
-        # pl.col("Key").str.split("/").list.get(3).alias("dstrct_code"),
-        # pl.col("Key").str.split("/").list.get(4).alias("filename"),
-    ).unnest("fields")
-
-    df = df.filter(
-        pl.col("hiveperiod").str.replace("hiveperiod=", "") >= "2025-12-01"
-    ).select("Key")
-    logger.info(f"final dataframe length: {len(df)}")
-
-    return df.select("Key")
-
-
-def write_target_keys_to_file(
-    creds, bucketname, prefix, hiveperiods, target_keys_filepath
-):
+def get_keys(creds, bucketname, prefix, daterange):
     logger = logging.getLogger(__name__)
 
     logger.info("Initiating key acquisition")
@@ -169,11 +141,28 @@ def write_target_keys_to_file(
         for obj in page["Contents"]:
             data.append(obj)
     logger.info(f"Obtained {len(data)} rows of keys from S3")
+    df = pl.from_dicts(data)
 
-    df = get_target_keys_by_partition(data, hiveperiods)
-    df.write_csv(target_keys_filepath)
+    df = df.with_columns(
+        pl.col("Key")
+        .str.splitn("/", 7)
+        .alias("list_substr_key")
+        .struct.rename_fields(
+            ["prefix1", "prefix2", "prefix3", "hiveperiod", "dstrct_code", "filename"]
+        )
+        .alias("fields")
+        # pl.col("Key").str.split("/").list.get(2).alias("hiveperiod"),
+        # pl.col("Key").str.split("/").list.get(3).alias("dstrct_code"),
+        # pl.col("Key").str.split("/").list.get(4).alias("filename"),
+    ).unnest("fields")
 
-    return len(df)
+    df = df.filter(
+        pl.col("hiveperiod")
+        .str.replace("hiveperiod=", "")
+        .is_between(daterange[0], daterange[1])
+    ).select("Key")
+    logger.info(f"final dataframe length: {len(df)}")
+    return df.get_column("Key").to_list()
 
 
 def reprocess_s3_data(conn, bucket_name: str, s3key_list: list, targetpath: str):
@@ -189,7 +178,6 @@ def reprocess_s3_data(conn, bucket_name: str, s3key_list: list, targetpath: str)
         f"""
         SELECT 
             * EXCLUDE (hiveperiod),
-            hiveperiod as hiveperiod_old,
             CAST(
             CASE
                 WHEN heartbeat < 10000000000 THEN make_timestamp(CAST(heartbeat * 1000000 as BIGINT) )
@@ -197,7 +185,15 @@ def reprocess_s3_data(conn, bucket_name: str, s3key_list: list, targetpath: str)
                 WHEN heartbeat < 10000000000000000 THEN make_timestamp(CAST(heartbeat as BIGINT))
                 ELSE make_timestamp(CAST(heartbeat / 1000 as BIGINT))
             END + INTERVAL 8 HOURS
-        AS DATE) as hiveperiod
+        AS DATE) as hiveperiod,
+            CAST(
+            CASE
+                WHEN heartbeat < 10000000000 THEN make_timestamp(CAST(heartbeat * 1000000 as BIGINT) )
+                WHEN heartbeat < 10000000000000 THEN make_timestamp(CAST(heartbeat * 1000 as BIGINT))
+                WHEN heartbeat < 10000000000000000 THEN make_timestamp(CAST(heartbeat as BIGINT))
+                ELSE make_timestamp(CAST(heartbeat / 1000 as BIGINT))
+            END + INTERVAL 8 HOURS
+        AS DATETIME) as datetime_wita
         FROM read_parquet({s3key_list_string},hive_partitioning=true)
     """
     )
@@ -215,7 +211,7 @@ def reprocess_s3_data(conn, bucket_name: str, s3key_list: list, targetpath: str)
     filename_pattern = "cleaned_{uuid}"
     main_query = f"""
         COPY (SELECT * FROM data)
-        TO '{targetpath}/datalog' 
+        TO '{targetpath}/datalog_v2' 
         (
             FORMAT parquet,
             COMPRESSION snappy,
@@ -238,23 +234,10 @@ def reprocess_s3_data(conn, bucket_name: str, s3key_list: list, targetpath: str)
 
 
 def main():
-    # 1. Read old data and write to datalog_v2 prefix
-    # 2. Compare results
-    # 3.
-    target_hiveperiod = (
-        pl.read_csv("target_hiveperiods.csv").get_column("hiveperiod").to_list()
-    )
-    row_count = write_target_keys_to_file(
-        aws_creds, BUCKET_NAME, PREFIX, target_hiveperiod, Path("data/target_keys.csv")
-    )
-    keys = pl.read_csv(Path("data/target_keys.csv")).get_column("Key").to_list()
-
+    keys_list = get_keys(aws_creds, BUCKET_NAME, PREFIX)
     with init_duckdb_connection(aws_creds, "4GB") as conn:
-        reprocess_s3_data(conn, BUCKET_NAME, keys[:3], Path("data/"))
-    print("row_count:", row_count)
-    return None
+        reprocess_s3_data(conn, BUCKET_NAME, keys_list[10:15], Path("../data/"))
 
 
 if __name__ == "__main__":
-    setup_logger(LOG_LEVEL, LOG_FILE_PATH, LOG_SIZE_MB, LOG_FILES_TO_KEEP)
     main()

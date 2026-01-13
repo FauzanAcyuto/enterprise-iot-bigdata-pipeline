@@ -6,7 +6,6 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from time import sleep
 
-import boto3
 import duckdb
 from sqlalchemy import URL, create_engine, text
 
@@ -148,6 +147,7 @@ def init_duckdb_connection(aws_credentials: dict, ram_limit: str):
     try:
         logger.info("Initializing duckdb connection to S3")
         conn = duckdb.connect()
+        conn.execute("SET TimeZone = 'UTC';")
         conn.execute("INSTALL httpfs;")
         conn.execute("LOAD httpfs;")
         conn.execute(f"SET memory_limit = '{ram_limit}'")
