@@ -170,7 +170,6 @@ def get_datalog_from_s3_per_hiveperiod(
 def update_compression_status_in_db(engine, keys: list, distrik: str):
     logger = logging.getLogger(__name__)
     row_num = len(keys)
-    logger.info(f"Updating success status for {row_num} keys")
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     key_list_string = "','".join(keys)
 
@@ -195,8 +194,14 @@ def update_compression_status_in_db(engine, keys: list, distrik: str):
         raise Exception
 
     with engine.connect() as conn:
-        result = conn.execute(query)
+        try:
+            result = conn.execute(query)
+        except Exception:
+            logger.exception("Error during metadata updates")
         conn.commit()
+    logger.info(
+        f"Updating success status for {row_num} keys with result {result.rowcount}"
+    )
 
     return result
 
@@ -215,7 +220,7 @@ def update_compression_status_in_db(engine, keys: list, distrik: str):
             enum=["data", "s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania"],
         ),
     },
-    tags=['AWS','ETL','S3']
+    tags=["AWS", "ETL", "S3"],
 )
 def compacter():
 
@@ -230,9 +235,7 @@ def compacter():
         )
 
         if not keys:
-            logger.info('no keys to process')
-            return 0
-
+            raise Exception("No keys to process")
 
         return keys
 
@@ -247,8 +250,8 @@ def compacter():
         }
 
         params = context["params"]
-        if len(keys) == 0:
-            return 0
+        if not keys:
+            raise Exception("No keys to process")
 
         with init_duckdb_connection(aws_creds, params["ram_limit"]) as conn:
             try:
@@ -258,12 +261,13 @@ def compacter():
                 return keys
             except Exception:
                 logger.exception("Exception occured in compact task")
+                raise
 
     @task
     def update_status(keys: list, **context):
         """Mark keys as processed in SQL Server."""
-        if len(keys) == 0:
-            return 0
+        if not keys:
+            raise Exception("No keys to process")
 
         params = context["params"]
 
