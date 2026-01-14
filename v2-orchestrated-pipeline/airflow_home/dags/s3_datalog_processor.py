@@ -1,19 +1,14 @@
 from contextlib import contextmanager
-from pathlib import Path
 import logging
 from datetime import datetime, timedelta
-import json
 
 import duckdb
 from sqlalchemy import text
 from airflow.sdk import dag, task
+from airflow.exceptions import AirflowSkipException
 from airflow.hooks.base import BaseHook
 from airflow.models import Param
-from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.providers.microsoft.mssql.hooks.mssql import MsSqlHook
-
-# ====== GLOBAL VARIABLES ======
-BUCKET_NAME = "smartdbucket"
 
 
 # ====== FUNCTION DECLARATIONS =======
@@ -54,7 +49,7 @@ def get_pending_keys_sql(engine, distrik, file_limit=1000):
 
     if distrik == "BRCB":
         query = text(
-            f"""SELECT TOP {file_limit} file_path_s3 
+            """SELECT TOP (:limit) file_path_s3 
                      FROM tbl_t_upload_datalog 
                      WHERE is_upload_s3 = 'true'
                         AND distrik = 'BRCB'
@@ -66,7 +61,7 @@ def get_pending_keys_sql(engine, distrik, file_limit=1000):
         )
     elif distrik == "BRCG":
         query = text(
-            f"""SELECT TOP {file_limit} file_name
+            """SELECT TOP (:limit) file_name
                         FROM tbl_t_upload_s3_log
                         WHERE distrik = 'BRCG'
                             AND (compression_status IS NULL OR compression_status IS NULL)
@@ -80,7 +75,7 @@ def get_pending_keys_sql(engine, distrik, file_limit=1000):
         raise Exception
 
     with engine.connect() as conn:
-        result = conn.execute(query)
+        result = conn.execute(query, {"limit": file_limit})
         list_of_keys = [row[0] for row in result]
 
     row_count = len(list_of_keys)
@@ -95,15 +90,12 @@ def get_pending_keys_sql(engine, distrik, file_limit=1000):
 
 def get_datalog_from_s3_per_hiveperiod(
     conn, bucket_name: str, s3key_list: list, targetpath: str, distrik: str
-):
+) -> int:
     logger = logging.getLogger(__name__)
 
     logger.info("Grabbing datalog for device all from s3")
 
-    s3key_list_string = (
-        f"['s3://{bucket_name}/" + f"', 's3://{bucket_name}/".join(s3key_list) + "']"
-    )
-    print(s3key_list_string[:100])
+    s3_paths = [f"s3://{bucket_name}/{k}" for k in s3key_list]
 
     query = f"""
         SELECT 
@@ -126,19 +118,19 @@ def get_datalog_from_s3_per_hiveperiod(
                 END + INTERVAL 8 HOURS
             AS DATETIME) as datetime_wita,
             filename AS source_file
-        FROM read_json_auto({s3key_list_string}, filename=true, sample_size=-1, union_by_name=true)
+        FROM read_json_auto(?, filename=true, sample_size=-1, union_by_name=true)
     """
 
-    data = conn.sql(query)
+    data = conn.sql(query, [s3_paths])
 
     logger.info("Got the main data from s3")
 
     row_count = data.count("*").fetchone()[0]
 
     if row_count == 0:
-        logger.warning(f"No data found for {s3key_list_string}")
+        logger.warning(f"No data found for {s3_paths}")
 
-        return None
+        return 0
 
     logger.info(f"Writing parquet file to target with {row_count} rows")
 
@@ -164,7 +156,7 @@ def get_datalog_from_s3_per_hiveperiod(
 
     logger.info("All done!")
 
-    return None
+    return row_count
 
 
 def update_compression_status_in_db(engine, keys: list, distrik: str):
@@ -178,6 +170,7 @@ def update_compression_status_in_db(engine, keys: list, distrik: str):
             f"""UPDATE tbl_t_upload_datalog
                         SET compression_status = 'SUCCESS', compression_timestamp = '{now}'
                         WHERE file_path_s3 IN ('{key_list_string}')
+                            AND compression_status IS NULL
                      """
         )
 
@@ -185,7 +178,8 @@ def update_compression_status_in_db(engine, keys: list, distrik: str):
         query = text(
             f"""UPDATE tbl_t_upload_s3_log
                         SET compression_status = 'SUCCESS', compression_timestamp = '{now}'
-                        WHERE file_name IN ('{key_list_string}') and status = 'OK'
+                        WHERE file_name IN ('{key_list_string}') AND status = 'OK'
+                            AND compression_status IS NULL
                      """
         )
 
@@ -208,7 +202,7 @@ def update_compression_status_in_db(engine, keys: list, distrik: str):
 
 # ====== DAG DEFINITION ======
 @dag(
-    dag_id="s3_data_compacter_BRCB",
+    dag_id="s3_datalog_processor",
     schedule=timedelta(hours=1),
     start_date=datetime(2026, 1, 5),
     params={
@@ -219,29 +213,29 @@ def update_compression_status_in_db(engine, keys: list, distrik: str):
             "s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania",
             enum=["data", "s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania"],
         ),
+        "bucket_name": "smartdbucket",
     },
     tags=["AWS", "ETL", "S3"],
+    render_template_as_native_obj=True,
 )
 def compacter():
 
     @task
-    def get_keys(**context):
-        logger = logging.getLogger(__name__)
-        params = context["params"]
-        hook = MsSqlHook(mssql_conn_id="mssql-pama")
-        engine = hook.get_sqlalchemy_engine()
-        keys = get_pending_keys_sql(
-            engine, params["distrik"], params["key_limit_per_run"]
-        )
-
-        if not keys:
-            raise Exception("No keys to process")
-
-        return keys
+    def get_keys(distrik: str, limit: int) -> list[str]:
+        engine = MsSqlHook(mssql_conn_id="mssql-pama").get_sqlalchemy_engine()
+        return get_pending_keys_sql(engine, distrik, limit)
 
     @task
-    def compact(keys: list, **context):
-        logger = logging.getLogger(__name__)
+    def compact(
+        keys: list,
+        bucket_name: str,
+        distrik: str,
+        ram_limit: str,
+        target_path: str,
+    ) -> list[str]:
+
+        if not keys:
+            raise AirflowSkipException("No keys provided")
         conn = BaseHook.get_connection("aws-creds")
         aws_creds = {
             "aws_secret_access_key": conn.extra_dejson.get("aws_secret_access_key"),
@@ -249,36 +243,37 @@ def compacter():
             "aws_region": conn.extra_dejson.get("aws_region"),
         }
 
-        params = context["params"]
-        if not keys:
-            raise Exception("No keys to process")
-
-        with init_duckdb_connection(aws_creds, params["ram_limit"]) as conn:
+        with init_duckdb_connection(aws_creds, ram_limit) as conn:
             try:
-                get_datalog_from_s3_per_hiveperiod(
-                    conn, BUCKET_NAME, keys, params["target_path"], params["distrik"]
+                row_count = get_datalog_from_s3_per_hiveperiod(
+                    conn, bucket_name, keys, target_path, distrik
                 )
+                if row_count == 0:
+                    raise AirflowSkipException("No data produced")
                 return keys
-            except Exception:
-                logger.exception("Exception occured in compact task")
+            except Exception as e:
+                logging.exception("Exception during compact run")
                 raise
 
     @task
-    def update_status(keys: list, **context):
-        """Mark keys as processed in SQL Server."""
-        if not keys:
-            raise Exception("No keys to process")
-
-        params = context["params"]
-
+    def update_status(keys: list, distrik: str):
         mssql_hook = MsSqlHook(mssql_conn_id="mssql-pama")
         engine = mssql_hook.get_sqlalchemy_engine()
 
-        update_compression_status_in_db(engine, keys, params["distrik"])
+        update_compression_status_in_db(engine, keys, distrik)
 
-    keys = get_keys()
-    result = compact(keys)
-    update_status(result)
+    keys = get_keys(
+        "{{params.distrik}}",
+        "{{params.key_limit_per_run}}",
+    )  # jinja templating rendered only during runtime
+    result = compact(
+        keys,
+        "{{params.bucket_name}}",
+        "{{params.distrik}}",
+        "{{params.ram_limit}}",
+        "{{params.target_path}}",
+    )
+    update_status(result, "{{params.distrik}}")
 
 
 compacter()
