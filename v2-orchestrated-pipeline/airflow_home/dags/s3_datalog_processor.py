@@ -59,7 +59,7 @@ def get_pending_keys_sql(engine, distrik, file_limit=1000):
                      WHERE is_upload_s3 = 'true'
                         AND distrik = 'BRCB'
                         AND file_path_lokal != 'Minio'
-                        AND (compression_status != 'SUCCESS'  OR compression_status IS NULL)
+                        AND (compression_status IS NULL  OR compression_status IS NULL)
                         AND upload_s3_date >= '2025-12-01 00:00'
                      ORDER BY upload_s3_date DESC
                      """
@@ -69,7 +69,7 @@ def get_pending_keys_sql(engine, distrik, file_limit=1000):
             f"""SELECT TOP {file_limit} file_name
                         FROM tbl_t_upload_s3_log
                         WHERE distrik = 'BRCG'
-                            AND (compression_status IS NULL OR compression_status != 'SUCCESS')
+                            AND (compression_status IS NULL OR compression_status IS NULL)
                             AND status = 'OK'
                             AND upload_date >= '2025-12-01 00:00'
                         ORDER BY upload_date DESC
@@ -170,7 +170,6 @@ def get_datalog_from_s3_per_hiveperiod(
 def update_compression_status_in_db(engine, keys: list, distrik: str):
     logger = logging.getLogger(__name__)
     row_num = len(keys)
-    logger.info(f"Updating success status for {row_num} keys")
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     key_list_string = "','".join(keys)
 
@@ -195,15 +194,21 @@ def update_compression_status_in_db(engine, keys: list, distrik: str):
         raise Exception
 
     with engine.connect() as conn:
-        result = conn.execute(query)
+        try:
+            result = conn.execute(query)
+        except Exception:
+            logger.exception("Error during metadata updates")
         conn.commit()
+    logger.info(
+        f"Updating success status for {row_num} keys with result {result.rowcount}"
+    )
 
     return result
 
 
 # ====== DAG DEFINITION ======
 @dag(
-    dag_id="s3_datalog_processor",
+    dag_id="s3_data_compacter_BRCB",
     schedule=timedelta(hours=1),
     start_date=datetime(2026, 1, 5),
     params={
@@ -215,16 +220,22 @@ def update_compression_status_in_db(engine, keys: list, distrik: str):
             enum=["data", "s3://smartdbucket/datalog/cis_smartd_tbl_iot_scania"],
         ),
     },
+    tags=["AWS", "ETL", "S3"],
 )
 def compacter():
 
     @task
     def get_keys(**context):
-        hook = MsSqlHook(mssql_conn_id="mssql_pama_compacter")
+        logger = logging.getLogger(__name__)
+        params = context["params"]
+        hook = MsSqlHook(mssql_conn_id="mssql-pama")
         engine = hook.get_sqlalchemy_engine()
         keys = get_pending_keys_sql(
             engine, params["distrik"], params["key_limit_per_run"]
         )
+
+        if not keys:
+            raise Exception("No keys to process")
 
         return keys
 
@@ -239,8 +250,8 @@ def compacter():
         }
 
         params = context["params"]
-        if len(keys) == 0:
-            return 0
+        if not keys:
+            raise Exception("No keys to process")
 
         with init_duckdb_connection(aws_creds, params["ram_limit"]) as conn:
             try:
@@ -250,16 +261,17 @@ def compacter():
                 return keys
             except Exception:
                 logger.exception("Exception occured in compact task")
+                raise
 
     @task
     def update_status(keys: list, **context):
         """Mark keys as processed in SQL Server."""
-        if len(keys) == 0:
-            return 0
+        if not keys:
+            raise Exception("No keys to process")
 
         params = context["params"]
 
-        mssql_hook = MsSqlHook(mssql_conn_id="mssql_pama")
+        mssql_hook = MsSqlHook(mssql_conn_id="mssql-pama")
         engine = mssql_hook.get_sqlalchemy_engine()
 
         update_compression_status_in_db(engine, keys, params["distrik"])
