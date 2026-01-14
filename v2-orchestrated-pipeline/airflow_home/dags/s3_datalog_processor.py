@@ -203,7 +203,7 @@ def update_compression_status_in_db(engine, keys: list, distrik: str):
 
 # ====== DAG DEFINITION ======
 @dag(
-    dag_id="s3_data_compacter",
+    dag_id="s3_datalog_processor",
     schedule=timedelta(hours=1),
     start_date=datetime(2026, 1, 5),
     params={
