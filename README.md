@@ -39,7 +39,7 @@ This prompted the project that I am showcasing, I coordinated with stakeholders 
 | Component | Description | Tech Stack | Status |
 |-----------|-------------|------------|--------|
 | [v1-basic-etl](./v1-basic-etl/README-compacterv1.md) | Initial pipeline with limitations | Python, Polars, DuckDB | ✅ Complete |
-| [v2-orchestrated-pipeline](./v2-orchestrated-pipeline) | Production-grade with orchestration | Airflow, dbt, Docker |  In Progress |
+| [v2-orchestrated-pipeline](./v2-orchestrated-pipeline/README-v2-orchestrated-pipeline.md) | Production-grade with orchestration | Airflow, dbt, Docker |  In Progress |
 | [streamlit-dashboard](./streamlit-dashboard) | Operational analytics UI | Streamlit, Plotly | ✅ Complete |
 | [docs](./docs) | Architecture & design decisions | Markdown, diagrams | ✅ Complete |
 
