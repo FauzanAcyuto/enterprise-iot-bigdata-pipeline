@@ -43,39 +43,73 @@ def init_duckdb_connection(aws_credentials: dict, ram_limit: str):
         conn.close()
 
 
-def get_pending_keys_sql(engine, distrik, file_limit=1000):
+def get_pending_keys_sql(
+    engine, distrik: str, run_id: str, file_limit=1000
+) -> list[str]:
     logger = logging.getLogger(__name__)
     logger.info(f"Getting log files S3 keys to compress with limit: {file_limit}")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     if distrik == "BRCB":
-        query = text(
-            """SELECT TOP (:limit) file_path_s3 
-                     FROM tbl_t_upload_datalog 
-                     WHERE is_upload_s3 = 'true'
-                        AND distrik = 'BRCB'
-                        AND file_path_lokal != 'Minio'
-                        AND (compression_status IS NULL  OR compression_status IS NULL)
-                        AND upload_s3_date >= '2025-12-01 00:00'
-                     ORDER BY upload_s3_date DESC
-                     """
+        update_query = text(
+            """UPDATE TOP (:limit) tbl_t_upload_datalog 
+                SET compression_run_id = :run_id,
+                    compression_status = 'RUNNING',
+                    compression_timestamp = :now
+               WHERE is_upload_s3 = 'true'
+                AND distrik = 'BRCB'
+                AND file_path_lokal != 'Minio'
+                AND compression_status IS NULL
+                AND compression_timestamp IS NULL
+                AND compression_run_id IS NULL
+                AND upload_s3_date >= '2025-12-01 00:00'
+               ORDER BY upload_s3_date DESC
+            """
         )
+
+        select_query = text(
+            """SELECT file_path_s3
+                FROM tbl_t_upload_datalog
+                WHERE compression_run_id = :run_id
+            """
+        )
+
     elif distrik == "BRCG":
-        query = text(
-            """SELECT TOP (:limit) file_name
-                        FROM tbl_t_upload_s3_log
-                        WHERE distrik = 'BRCG'
-                            AND (compression_status IS NULL OR compression_status IS NULL)
-                            AND status = 'OK'
-                            AND upload_date >= '2025-12-01 00:00'
-                        ORDER BY upload_date DESC
+        update_query = text(
+            """UPDATE TOP (:limit) tbl_t_upload_s3_log
+                SET compression_run_id = :run_id,
+                    compression_status = 'RUNNING',
+                    compression_timestamp = :now
+                WHERE distrik = 'BRCG'
+                    AND compression_status IS NULL 
+                    AND compression_timestamp IS NULL
+                    AND status = 'OK'
+                    AND compression_run_id IS NULL
+                    AND upload_date >= '2025-12-01 00:00'
+                ORDER BY upload_date DESC
                     """
+        )
+        select_query = text(
+            """SELECT file_name
+                FROM tbl_t_upload_s3_log
+                WHERE compression_run_id = :run_id
+            """
         )
     else:
         logger.exception("District variable not in 'BRCB' OR 'BRCG'")
         raise Exception
 
-    with engine.connect() as conn:
-        result = conn.execute(query, {"limit": file_limit})
+    update_params = {
+        "limit": file_limit,
+        "run_id": run_id,
+        "now": now,
+    }
+
+    select_params = {"run_id": run_id}
+    with engine.begin() as conn:
+        conn.execute(update_query, update_params)
+        result = conn.execute(select_query, select_params)
+
         list_of_keys = [row[0] for row in result]
 
     row_count = len(list_of_keys)
@@ -159,27 +193,36 @@ def get_datalog_from_s3_per_hiveperiod(
     return row_count
 
 
-def update_compression_status_in_db(engine, keys: list, distrik: str):
+def update_compression_status_in_db(
+    engine, keys: list, distrik: str, status: str, run_id: str
+):
     logger = logging.getLogger(__name__)
     row_num = len(keys)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     key_list_string = "','".join(keys)
 
+    sql_params = {
+        "status": status,
+        "now": now,
+        "key_list_string": key_list_string,
+        "run_id": run_id,
+    }
+
     if distrik == "BRCB":
         query = text(
-            f"""UPDATE tbl_t_upload_datalog
-                        SET compression_status = 'SUCCESS', compression_timestamp = '{now}'
-                        WHERE file_path_s3 IN ('{key_list_string}')
-                            AND compression_status IS NULL
+            """UPDATE tbl_t_upload_datalog
+                        SET compression_status = :status, compression_timestamp = :now
+                        WHERE file_path_s3 IN (':key_list_string')
+                            AND compression_run_id = :run_id
                      """
         )
 
     elif distrik == "BRCG":
         query = text(
-            f"""UPDATE tbl_t_upload_s3_log
-                        SET compression_status = 'SUCCESS', compression_timestamp = '{now}'
-                        WHERE file_name IN ('{key_list_string}') AND status = 'OK'
-                            AND compression_status IS NULL
+            """UPDATE tbl_t_upload_s3_log
+                        SET compression_status = :status, compression_timestamp = :now 
+                        WHERE file_name IN (':key_list_string') AND status = 'OK'
+                            AND compression_run_id = :run_id
                      """
         )
 
@@ -189,7 +232,7 @@ def update_compression_status_in_db(engine, keys: list, distrik: str):
 
     with engine.connect() as conn:
         try:
-            result = conn.execute(query)
+            result = conn.execute(query, sql_params)
         except Exception:
             logger.exception("Error during metadata updates")
         conn.commit()
@@ -221,9 +264,9 @@ def update_compression_status_in_db(engine, keys: list, distrik: str):
 def compacter():
 
     @task
-    def get_keys(distrik: str, limit: int) -> list[str]:
+    def get_keys(distrik: str, run_id: str, limit: int) -> list[str]:
         engine = MsSqlHook(mssql_conn_id="mssql-pama").get_sqlalchemy_engine()
-        return get_pending_keys_sql(engine, distrik, limit)
+        return get_pending_keys_sql(engine, distrik, run_id, limit)
 
     @task
     def compact(
@@ -256,14 +299,15 @@ def compacter():
                 raise
 
     @task
-    def update_status(keys: list, distrik: str):
+    def update_status(keys: list, distrik: str, run_id: str):
         mssql_hook = MsSqlHook(mssql_conn_id="mssql-pama")
         engine = mssql_hook.get_sqlalchemy_engine()
 
-        update_compression_status_in_db(engine, keys, distrik)
+        update_compression_status_in_db(engine, keys, distrik, "SUCCESS", run_id)
 
     keys = get_keys(
         "{{params.distrik}}",
+        "{{dag_run.run_id}}",
         "{{params.key_limit_per_run}}",
     )  # jinja templating rendered only during runtime
     result = compact(
@@ -273,7 +317,11 @@ def compacter():
         "{{params.ram_limit}}",
         "{{params.target_path}}",
     )
-    update_status(result, "{{params.distrik}}")
+    update_status(
+        result,
+        "{{params.distrik}}",
+        "{{dag_run.run_id}}",
+    )
 
 
 compacter()
