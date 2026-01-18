@@ -11,8 +11,8 @@ from sqlalchemy import URL, create_engine, text
 
 # ====== USER INPUT ======
 DISTRIK = input("What district should we work on? ").upper()
-if DISTRIK not in ("BRCB", "BRCG"):
-    raise Exception("Distrik not in BRCB or BRCG!")
+if DISTRIK not in ("DISTRICTB", "DISTRICTG"):
+    raise Exception("Distrik not in DISTRICTB or DISTRICTG!")
 
 run_type = input("STEADY or BOOST mode? ").upper()
 if run_type == "BOOST":
@@ -168,23 +168,23 @@ def get_pending_keys_sql(engine, distrik, file_limit=1000):
     logger = logging.getLogger(__name__)
     logger.info(f"Getting log files S3 keys to compress with limit: {file_limit}")
 
-    if distrik == "BRCB":
+    if distrik == "DISTRICTB":
         query = text(
             f"""SELECT TOP {file_limit} file_path_s3 
                      FROM tbl_t_upload_datalog 
                      WHERE is_upload_s3 = 'true'
-                        AND distrik = 'BRCB'
+                        AND distrik = 'DISTRICTB'
                         AND file_path_lokal != 'Minio'
                         AND (compression_status != 'SUCCESS'  OR compression_status IS NULL)
                         AND upload_s3_date >= '2025-12-01 00:00'
                      ORDER BY upload_s3_date DESC
                      """
         )
-    elif distrik == "BRCG":
+    elif distrik == "DISTRICTG":
         query = text(
             f"""SELECT TOP {file_limit} file_name
                         FROM tbl_t_upload_s3_log
-                        WHERE distrik = 'BRCG'
+                        WHERE distrik = 'DISTRICTG'
                             AND (compression_status IS NULL OR compression_status != 'SUCCESS')
                             AND status = 'OK'
                             AND upload_date >= '2025-12-01 00:00'
@@ -192,7 +192,7 @@ def get_pending_keys_sql(engine, distrik, file_limit=1000):
                     """
         )
     else:
-        logger.exception("District variable not in 'BRCB' OR 'BRCG'")
+        logger.exception("District variable not in 'DISTRICTB' OR 'DISTRICTG'")
         raise Exception
 
     with engine.connect() as conn:
@@ -290,7 +290,7 @@ def update_compression_status_in_db(engine, keys: list, distrik: str):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     key_list_string = "','".join(keys)
 
-    if distrik == "BRCB":
+    if distrik == "DISTRICTB":
         query = text(
             f"""UPDATE tbl_t_upload_datalog
                         SET compression_status = 'SUCCESS', compression_timestamp = '{now}'
@@ -298,7 +298,7 @@ def update_compression_status_in_db(engine, keys: list, distrik: str):
                      """
         )
 
-    elif distrik == "BRCG":
+    elif distrik == "DISTRICTG":
         query = text(
             f"""UPDATE tbl_t_upload_s3_log
                         SET compression_status = 'SUCCESS', compression_timestamp = '{now}'
@@ -307,7 +307,7 @@ def update_compression_status_in_db(engine, keys: list, distrik: str):
         )
 
     else:
-        logger.exception("District variable not in 'BRCB' OR 'BRCG'")
+        logger.exception("District variable not in 'DISTRICTB' OR 'DISTRICTG'")
         raise Exception
 
     with engine.connect() as conn:

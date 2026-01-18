@@ -115,7 +115,7 @@ if "data_successfully_loaded" not in st.session_state:
 
 # Default values
 wita_today = datetime.now(ZoneInfo(TIMEZONE))
-districts = ["BRCB", "BRCG"]
+districts = ["DISTRICTB", "DISTRICTG"]
 unit_list = ["LD772", "LD782", "LD781", "PM1582", "PM1598", "PM189"]
 
 # Filter definition

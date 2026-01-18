@@ -50,14 +50,14 @@ def get_pending_keys_sql(
     logger.info(f"Getting log files S3 keys to compress with limit: {file_limit}")
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    if distrik == "BRCB":
+    if distrik == "DISTRICTB":
         update_query = text(
             """UPDATE TOP (:limit) tbl_t_upload_datalog 
                 SET compression_run_id = :run_id,
                     compression_status = 'RUNNING',
                     compression_timestamp = :now
                WHERE is_upload_s3 = 'true'
-                AND distrik = 'BRCB'
+                AND distrik = 'DISTRICTB'
                 AND file_path_lokal != 'Minio'
                 AND compression_status IS NULL
                 AND compression_timestamp IS NULL
@@ -74,13 +74,13 @@ def get_pending_keys_sql(
             """
         )
 
-    elif distrik == "BRCG":
+    elif distrik == "DISTRICTG":
         update_query = text(
             """UPDATE TOP (:limit) tbl_t_upload_s3_log
                 SET compression_run_id = :run_id,
                     compression_status = 'RUNNING',
                     compression_timestamp = :now
-                WHERE distrik = 'BRCG'
+                WHERE distrik = 'DISTRICTG'
                     AND compression_status IS NULL 
                     AND compression_timestamp IS NULL
                     AND status = 'OK'
@@ -96,7 +96,7 @@ def get_pending_keys_sql(
             """
         )
     else:
-        logger.exception("District variable not in 'BRCB' OR 'BRCG'")
+        logger.exception("District variable not in 'DISTRICTB' OR 'DISTRICTG'")
         raise Exception
 
     update_params = {
@@ -208,7 +208,7 @@ def update_compression_status_in_db(
         "run_id": run_id,
     }
 
-    if distrik == "BRCB":
+    if distrik == "DISTRICTB":
         query = text(
             """UPDATE tbl_t_upload_datalog
                         SET compression_status = :status, compression_timestamp = :now
@@ -217,7 +217,7 @@ def update_compression_status_in_db(
                      """
         )
 
-    elif distrik == "BRCG":
+    elif distrik == "DISTRICTG":
         query = text(
             """UPDATE tbl_t_upload_s3_log
                         SET compression_status = :status, compression_timestamp = :now 
@@ -227,7 +227,7 @@ def update_compression_status_in_db(
         )
 
     else:
-        logger.exception("District variable not in 'BRCB' OR 'BRCG'")
+        logger.exception("District variable not in 'DISTRICTB' OR 'DISTRICTG'")
         raise Exception
 
     with engine.connect() as conn:
@@ -249,7 +249,7 @@ def update_compression_status_in_db(
     schedule=timedelta(hours=1),
     start_date=datetime(2026, 1, 5),
     params={
-        "distrik": Param("BRCB", enum=["BRCG", "BRCB"]),
+        "distrik": Param("DISTRICTB", enum=["DISTRICTG", "DISTRICTB"]),
         "key_limit_per_run": Param(1000, type="integer"),
         "ram_limit": Param("10GB", type="string"),
         "target_path": Param(
